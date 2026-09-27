@@ -15,9 +15,10 @@ Binary: `/Users/o3-peter/Documents/omo/devin-vm/bin/dvm` (below, `dvm`).
 ## Prerequisites
 
 - `devin` CLI installed and logged in (`devin auth login`). Check with `dvm doctor`.
-- API access for creating sessions: the CLI login is tried first. If `dvm doctor` reports
-  `api FAILED`, the user must create a `cog_` PAT (app.devin.ai > Settings > Devin API) and
-  export `DEVIN_API_KEY`. Without API access, create the Mac session in the web app or with
+- API access for creating sessions: the CLI login token (`windsurf_api_key` in
+  `~/.local/share/devin/credentials.toml`) is accepted by the v3 API, so no extra key is needed.
+  If `dvm doctor` reports `api FAILED`, the user must run `devin auth login` again or create a
+  `cog_` PAT (app.devin.ai > Settings > Devin API) and export `DEVIN_API_KEY`. Without API access, create the Mac session in the web app or with
   `devin --cloud` + `/platform`, then `dvm use <session-id-or-url>`.
 
 ## Workflow
