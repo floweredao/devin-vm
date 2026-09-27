@@ -73,8 +73,13 @@ otherwise pass arguments directly.
 
 ## Limits
 
-- Idle sessions sleep after about 30 minutes; running processes (dev servers, simulators) stop
-  and must be restarted. Disk contents survive.
+- Devin suspends the session when its agent is idle, and SSH work does not count as activity:
+  the VM can go to sleep in the middle of a command. Running processes (builds, dev servers,
+  simulators) stop; disk contents survive. `dvm` then logs in again (which wakes the VM, about
+  30-40 s) and retries the interrupted command once, so keep commands safe to re-run.
+- The first connection adds the `ssh.devin.ai` host key to `~/.ssh/known_hosts`.
+- Transport: `devin ssh` is used only to log in; commands and rsync reuse that login through an
+  OpenSSH ControlMaster under `.state/`, so connections after the first take about a second.
 - No nested virtualization: Docker runs under QEMU emulation, roughly 15-25x slower.
 - No physical devices; performance profiling is not representative.
 - Keep on the local Mac: Aside/signed-in browser work, local computer-use GUI automation, and
