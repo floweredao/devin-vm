@@ -1,0 +1,288 @@
+#!/usr/bin/env bash
+# dvm - use a Devin Cloud macOS VM as a remote build/QA machine.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+SELF="$ROOT/bin/dvm"
+STATE_DIR="${DVM_STATE_DIR:-$ROOT/.state}"
+CURRENT_FILE="$STATE_DIR/current"
+API_BASE="${DEVIN_API_BASE:-https://api.devin.ai}"
+HOLD_PROMPT='This session is a remote macOS build/QA machine that another agent drives over SSH. Do not start any work, do not edit files, do not open pull requests, and do not run commands. Reply with the single word "ready" and then wait silently.'
+
+die() { echo "dvm: $*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not installed"; }
+
+usage() {
+  cat <<'EOF'
+dvm - drive a Devin Cloud macOS VM from a local agent session
+
+Session
+  dvm up [--repo owner/repo]... [--title T] [--platform macos]
+                              create a VM session, make it current, wait for SSH
+  dvm use <session-id|url>    make an existing session current
+  dvm current                 print the current session id
+  dvm status                  show status, usage, and URL of the current session
+  dvm wait [seconds]          wait until SSH to the VM answers (default 600)
+  dvm sleep                   archive the session (disk kept, processes stop)
+  dvm down                    terminate the session permanently
+
+Work
+  dvm run [--cd DIR] -- CMD...  run CMD on the VM (login zsh), exit code is CMD's
+  dvm push [LOCAL_DIR] [REMOTE_DIR] [--exclude PATTERN]...
+                              rsync a directory to the VM (default ~/work/<name>)
+  dvm pull REMOTE_PATH [LOCAL_DEST]
+                              rsync files back (default ./dvm-artifacts/)
+  dvm forward PORT...         forward VM ports to localhost (foreground)
+  dvm shell                   interactive shell on the VM
+  dvm doctor                  check CLI, auth, API access, and the current session
+
+Environment
+  DEVIN_API_KEY   cog_ token (PAT or service user); falls back to the CLI login
+  DEVIN_ORG_ID    organization id; resolved from /v3/self when unset
+  DVM_SESSION     override the current session id
+EOF
+}
+
+# ---------- auth / API ----------
+
+cli_token() {
+  local cred="${DEVIN_CREDENTIALS_FILE:-$HOME/.local/share/devin/credentials.toml}"
+  [[ -f "$cred" ]] || return 1
+  local value
+  value="$(sed -nE 's/^[[:space:]]*(api_key|token|access_token)[[:space:]]*=[[:space:]]*"([^"]+)".*/\2/p' "$cred" | head -1)"
+  [[ -n "$value" ]] || return 1
+  printf '%s' "$value"
+}
+
+token() {
+  if [[ -n "${DEVIN_API_KEY:-}" ]]; then
+    printf '%s' "$DEVIN_API_KEY"
+  else
+    cli_token || die "no API credential: run 'devin auth login' or set DEVIN_API_KEY"
+  fi
+}
+
+api() { # METHOD PATH [JSON_BODY]
+  local method="$1" path="$2" body="${3:-}" args
+  args=(-sS --fail-with-body -X "$method" "$API_BASE$path"
+        -H "Authorization: Bearer $(token)" -H "Accept: application/json")
+  if [[ -n "$body" ]]; then
+    args+=(-H "Content-Type: application/json" --data "$body")
+  fi
+  curl "${args[@]}" || die "API $method $path failed"
+}
+
+org_id() {
+  if [[ -n "${DEVIN_ORG_ID:-}" ]]; then
+    printf '%s' "$DEVIN_ORG_ID"
+    return
+  fi
+  if [[ -s "$STATE_DIR/org_id" ]]; then
+    cat "$STATE_DIR/org_id"
+    return
+  fi
+  local org
+  org="$(api GET /v3/self | jq -r '.org_id // empty')"
+  [[ -n "$org" ]] || die "could not resolve org id from /v3/self; set DEVIN_ORG_ID"
+  mkdir -p "$STATE_DIR"
+  printf '%s' "$org" > "$STATE_DIR/org_id"
+  printf '%s' "$org"
+}
+
+# ---------- session ----------
+
+normalize_id() { # accepts an id or an app.devin.ai session URL
+  local raw="${1%/}"
+  raw="${raw##*/}"
+  [[ "$raw" == devin-* ]] || raw="devin-$raw"
+  printf '%s' "$raw"
+}
+
+session() {
+  if [[ -n "${DVM_SESSION:-}" ]]; then
+    normalize_id "$DVM_SESSION"
+  elif [[ -s "$CURRENT_FILE" ]]; then
+    cat "$CURRENT_FILE"
+  else
+    die "no current session: run 'dvm up' or 'dvm use <id>'"
+  fi
+}
+
+set_current() {
+  mkdir -p "$STATE_DIR"
+  printf '%s' "$1" > "$CURRENT_FILE"
+}
+
+cmd_up() {
+  local platform="macos" title="dvm remote mac" repos=() body response sid url
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo) repos+=("$2"); shift 2 ;;
+      --title) title="$2"; shift 2 ;;
+      --platform) platform="$2"; shift 2 ;;
+      *) die "up: unknown argument '$1'" ;;
+    esac
+  done
+  body="$(jq -n --arg prompt "$HOLD_PROMPT" --arg title "$title" --arg platform "$platform" \
+    --args '{prompt: $prompt, title: $title, platform: $platform, tags: ["dvm"]}
+            + (if ($ARGS.positional | length) > 0 then {repos: $ARGS.positional} else {} end)' \
+    ${repos[@]+"${repos[@]}"})"
+  response="$(api POST "/v3/organizations/$(org_id)/sessions" "$body")"
+  sid="$(jq -r '.session_id' <<<"$response")"
+  url="$(jq -r '.url' <<<"$response")"
+  [[ -n "$sid" && "$sid" != null ]] || die "unexpected create response: $response"
+  set_current "$sid"
+  echo "session $sid"
+  echo "url     $url"
+  cmd_wait
+}
+
+cmd_use() {
+  [[ $# -eq 1 ]] || die "use: expected one session id or URL"
+  set_current "$(normalize_id "$1")"
+  cat "$CURRENT_FILE"; echo
+}
+
+cmd_status() {
+  api GET "/v3/organizations/$(org_id)/sessions/$(session)" |
+    jq -r '"session  \(.session_id)\nstatus   \(.status) \(.status_detail // "")\nusage    \(.acus_consumed)\nurl      \(.url)"'
+}
+
+cmd_wait() {
+  local limit="${1:-600}" sid start
+  sid="$(session)"
+  start=$SECONDS
+  echo "waiting for SSH on $sid (up to ${limit}s)..."
+  until remote_ssh "$sid" true >/dev/null 2>&1; do
+    (( SECONDS - start < limit )) || die "SSH did not answer within ${limit}s"
+    sleep 10
+  done
+  echo "ready after $((SECONDS - start))s"
+}
+
+cmd_sleep() {
+  api POST "/v3/organizations/$(org_id)/sessions/$(session)/archive" >/dev/null
+  echo "archived $(session)"
+}
+
+cmd_down() {
+  local sid
+  sid="$(session)"
+  api DELETE "/v3/organizations/$(org_id)/sessions/$sid" >/dev/null
+  rm -f "$CURRENT_FILE"
+  echo "terminated $sid"
+}
+
+# ---------- remote execution ----------
+
+# Every SSH hop goes through here so the transport is defined in one place.
+remote_ssh() { # SID REMOTE_COMMAND...
+  local sid="$1"
+  shift
+  devin ssh "$sid" "$@"
+}
+
+remote_cmd() { # DIR CMD... -> single zsh -lc string; one argument is taken as a shell script
+  local dir="$1" joined
+  shift
+  if [[ $# -eq 1 ]]; then
+    joined="$1"
+  else
+    printf -v joined '%q ' "$@"
+  fi
+  local script="cd $dir && $joined"
+  printf 'zsh -lc %q' "$script"
+}
+
+cmd_run() {
+  local dir='~'
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --cd) dir="$2"; shift 2 ;;
+      --) shift; break ;;
+      *) break ;;
+    esac
+  done
+  [[ $# -gt 0 ]] || die "run: missing command"
+  remote_ssh "$(session)" "$(remote_cmd "$dir" "$@")"
+}
+
+cmd_rsh() { # rsync transport: dvm _rsh HOST CMD...
+  shift
+  remote_ssh "$(session)" "$@"
+}
+
+cmd_push() {
+  local local_dir="" remote_dir="" excludes=(node_modules/ .build/ DerivedData/ build/ .DS_Store .state/)
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --exclude) excludes+=("$2"); shift 2 ;;
+      *) if [[ -z "$local_dir" ]]; then local_dir="$1"; elif [[ -z "$remote_dir" ]]; then remote_dir="$1"; else die "push: too many arguments"; fi; shift ;;
+    esac
+  done
+  local_dir="$(cd "${local_dir:-.}" && pwd)"
+  remote_dir="${remote_dir:-work/$(basename "$local_dir")}"
+  local args=(-az --delete -e "$SELF _rsh")
+  local pattern
+  for pattern in "${excludes[@]}"; do args+=(--exclude "$pattern"); done
+  remote_ssh "$(session)" "mkdir -p $remote_dir"
+  rsync "${args[@]}" "$local_dir/" "dvm:$remote_dir/"
+  echo "pushed $local_dir -> ~/$remote_dir"
+}
+
+cmd_pull() {
+  [[ $# -ge 1 ]] || die "pull: missing REMOTE_PATH"
+  local remote="$1" dest="${2:-./dvm-artifacts/}"
+  mkdir -p "$dest"
+  rsync -az -e "$SELF _rsh" "dvm:$remote" "$dest"
+  echo "pulled ~/$remote -> $dest"
+}
+
+cmd_forward() {
+  [[ $# -ge 1 ]] || die "forward: missing PORT"
+  exec devin forward "$(session)" "$@"
+}
+
+cmd_shell() { exec devin ssh "$(session)"; }
+
+cmd_doctor() {
+  echo "devin    $(devin --version 2>&1 | head -1)"
+  devin auth status 2>&1 | sed 's/^/auth     /' | head -2
+  if self="$(api GET /v3/self 2>/dev/null)"; then
+    echo "api      ok ($(jq -r '.principal_type // "?"' <<<"$self"), org $(jq -r '.org_id // "?"' <<<"$self"))"
+  else
+    echo "api      FAILED (set DEVIN_API_KEY to a cog_ PAT if the CLI login is not accepted)"
+  fi
+  if [[ -n "${DVM_SESSION:-}" || -s "$CURRENT_FILE" ]]; then
+    cmd_status || true
+    if remote_ssh "$(session)" true >/dev/null 2>&1; then echo "ssh      ok"; else echo "ssh      not reachable"; fi
+  else
+    echo "session  none"
+  fi
+}
+
+main() {
+  need devin; need jq; need curl
+  local sub="${1:-help}"
+  [[ $# -gt 0 ]] && shift
+  case "$sub" in
+    up) cmd_up "$@" ;;
+    use) cmd_use "$@" ;;
+    current) session; echo ;;
+    status) cmd_status ;;
+    wait) cmd_wait "$@" ;;
+    sleep) cmd_sleep ;;
+    down) cmd_down ;;
+    run) cmd_run "$@" ;;
+    push) need rsync; cmd_push "$@" ;;
+    pull) need rsync; cmd_pull "$@" ;;
+    forward) cmd_forward "$@" ;;
+    shell) cmd_shell ;;
+    doctor) cmd_doctor ;;
+    _rsh) cmd_rsh "$@" ;;
+    help|-h|--help) usage ;;
+    *) usage >&2; exit 2 ;;
+  esac
+}
+
+main "$@"
