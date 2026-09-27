@@ -1,0 +1,84 @@
+---
+name: devin-vm
+description: Offload heavy local work (Xcode/Swift builds, iOS Simulator runs, test suites, headless browser QA) to a Devin Cloud macOS VM over SSH with the dvm wrapper. Use when the user asks to run builds, tests, or QA on the Devin VM, or when the local Mac is overloaded.
+---
+
+# devin-vm
+
+`dvm` drives a Devin Cloud macOS VM (Apple silicon, Xcode 26 + 27 RC, iOS 26/27 simulators,
+Chrome, Homebrew, Node/Python/Rust) as a remote build and QA machine. The VM belongs to a
+Devin session; `dvm` creates that session with a "do nothing, wait" prompt so the Devin agent
+stays idle and the VM is used only through SSH.
+
+Binary: `/Users/o3-peter/Documents/omo/devin-vm/bin/dvm` (below, `dvm`).
+
+## Prerequisites
+
+- `devin` CLI installed and logged in (`devin auth login`). Check with `dvm doctor`.
+- API access for creating sessions: the CLI login is tried first. If `dvm doctor` reports
+  `api FAILED`, the user must create a `cog_` PAT (app.devin.ai > Settings > Devin API) and
+  export `DEVIN_API_KEY`. Without API access, create the Mac session in the web app or with
+  `devin --cloud` + `/platform`, then `dvm use <session-id-or-url>`.
+
+## Workflow
+
+1. `dvm doctor` - confirm CLI, auth, API, and whether a current session exists.
+2. `dvm up` - only when there is no usable current session. Creates a macOS session, stores it
+   as current, and waits for SSH. Reuse the current session across tasks instead of creating
+   new ones.
+3. `dvm push [LOCAL_DIR] [REMOTE_DIR]` - rsync the project (default remote `~/work/<name>`;
+   excludes node_modules, .build, DerivedData, build, .DS_Store). Push again after local edits.
+4. `dvm run --cd work/<name> -- <command...>` - runs in a login zsh; the exit code is the
+   command's. Keep each run self-contained: build, test, and write artifacts in one call.
+5. `dvm pull <remote-path> [local-dest]` - bring back logs, screenshots, xcresult bundles.
+6. `dvm sleep` when the work is done for now (disk kept, processes stop);
+   `dvm down` only when the user wants the VM gone.
+
+`dvm forward PORT` forwards a VM port to localhost and blocks; run it as a background session.
+`dvm shell` is interactive and only for the user.
+
+## Recipes
+
+iOS build and unit tests on the simulator:
+
+```bash
+dvm push ~/code/MyApp
+dvm run --cd work/MyApp -- xcodebuild -scheme MyApp \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -resultBundlePath build/Test.xcresult test
+dvm pull work/MyApp/build/Test.xcresult ./dvm-artifacts/
+```
+
+Simulator launch + screenshot:
+
+```bash
+dvm run -- 'xcrun simctl boot "iPhone 17" || true'
+dvm run --cd work/MyApp -- xcrun simctl install booted build/MyApp.app
+dvm run -- xcrun simctl launch booted com.example.MyApp
+dvm run -- xcrun simctl io booted screenshot /Users/devin/shot.png
+dvm pull shot.png ./dvm-artifacts/
+```
+
+Web QA fully on the VM (dev server + headless browser in one run):
+
+```bash
+dvm push ~/code/web
+dvm run --cd work/web -- 'npm ci && (npm run dev >/tmp/dev.log 2>&1 &) && npx playwright test'
+dvm pull work/web/playwright-report ./dvm-artifacts/
+```
+
+Pass a single quoted string when the command needs shell operators (`&&`, `|`, `&`, redirects);
+otherwise pass arguments directly.
+
+## Limits
+
+- Idle sessions sleep after about 30 minutes; running processes (dev servers, simulators) stop
+  and must be restarted. Disk contents survive.
+- No nested virtualization: Docker runs under QEMU emulation, roughly 15-25x slower.
+- No physical devices; performance profiling is not representative.
+- Keep on the local Mac: Aside/signed-in browser work, local computer-use GUI automation, and
+  anything needing local-only services or files the user has not approved for upload.
+- Code and any secrets pushed leave the machine for Cognition's cloud. Do not push `.env` files
+  or credentials unless the user asked.
+- Usage: the session counts against the user's Devin quota (mostly agent activity; VM time is a
+  small fraction). Never message the Devin agent in the session; that spends quota.
