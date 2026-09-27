@@ -1,0 +1,8 @@
+#!/bin/bash
+# Placed first on PATH only while `dvm` runs `devin ssh` to log in: turns that login into an
+# OpenSSH ControlMaster so plain, PTY-free ssh/rsync can reuse the authenticated connection.
+if [[ -n "${DVM_CONTROL_PATH:-}" ]]; then
+  exec /usr/bin/ssh -o ControlMaster=auto -o "ControlPath=$DVM_CONTROL_PATH" \
+    -o ControlPersist="${DVM_CONTROL_PERSIST:-1800}" -o ServerAliveInterval=30 "$@"
+fi
+exec /usr/bin/ssh "$@"

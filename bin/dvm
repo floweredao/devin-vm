@@ -3,8 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-SELF="$ROOT/bin/dvm"
 STATE_DIR="${DVM_STATE_DIR:-$ROOT/.state}"
+[[ "$STATE_DIR" != *[[:space:]]* ]] || { echo "dvm: state dir path must not contain spaces: $STATE_DIR" >&2; exit 1; }
 CURRENT_FILE="$STATE_DIR/current"
 API_BASE="${DEVIN_API_BASE:-https://api.devin.ai}"
 HOLD_PROMPT='This session is a remote macOS build/QA machine that another agent drives over SSH. Do not start any work, do not edit files, do not open pull requests, and do not run commands. Reply with the single word "ready" and then wait silently.'
@@ -94,8 +94,7 @@ org_id() {
 normalize_id() { # accepts an id or an app.devin.ai session URL
   local raw="${1%/}"
   raw="${raw##*/}"
-  [[ "$raw" == devin-* ]] || raw="devin-$raw"
-  printf '%s' "$raw"
+  printf '%s' "${raw#devin-}"
 }
 
 session() {
@@ -153,7 +152,7 @@ cmd_wait() {
   sid="$(session)"
   start=$SECONDS
   echo "waiting for SSH on $sid (up to ${limit}s)..."
-  until remote_ssh "$sid" true >/dev/null 2>&1; do
+  until open_master "$sid"; do
     (( SECONDS - start < limit )) || die "SSH did not answer within ${limit}s"
     sleep 10
   done
@@ -161,13 +160,17 @@ cmd_wait() {
 }
 
 cmd_sleep() {
-  api POST "/v3/organizations/$(org_id)/sessions/$(session)/archive" >/dev/null
-  echo "archived $(session)"
+  local sid
+  sid="$(session)"
+  close_master "$sid"
+  api POST "/v3/organizations/$(org_id)/sessions/$sid/archive" >/dev/null
+  echo "archived $sid"
 }
 
 cmd_down() {
   local sid
   sid="$(session)"
+  close_master "$sid"
   api DELETE "/v3/organizations/$(org_id)/sessions/$sid" >/dev/null
   rm -f "$CURRENT_FILE"
   echo "terminated $sid"
@@ -175,11 +178,71 @@ cmd_down() {
 
 # ---------- remote execution ----------
 
-# Every SSH hop goes through here so the transport is defined in one place.
+# A first connection otherwise stops at ssh's interactive host-key prompt.
+ensure_host_key() {
+  local host="${DVM_SSH_GATEWAY:-ssh.devin.ai}"
+  ssh-keygen -F "$host" >/dev/null 2>&1 && return
+  mkdir -p "$HOME/.ssh"
+  ssh-keyscan -t ed25519 "$host" 2>/dev/null >> "$HOME/.ssh/known_hosts" ||
+    die "could not fetch the host key of $host"
+  echo "dvm: added $host host key: $(ssh-keygen -lf <(ssh-keyscan -t ed25519 "$host" 2>/dev/null) | awk '{print $2}')" >&2
+}
+
+with_timeout() { # SECONDS CMD... (macOS has no timeout(1))
+  perl -e 'alarm shift; exec @ARGV or die "exec failed: $!"' "$@"
+}
+
+# Transport. The gateway authenticates with a keyboard-interactive code that `devin ssh`
+# types into a local PTY; that PTY echoes stdin, rewrites \n to \r\n, and never passes EOF,
+# so nothing binary (rsync, tar) survives it. `devin ssh` is therefore used only to
+# authenticate: libexec/ssh (put first on PATH) makes that login an OpenSSH ControlMaster,
+# and every command and transfer then runs over plain, PTY-free ssh that reuses it.
+ssh_host() { printf 'devin-%s@%s' "$1" "${DVM_SSH_GATEWAY:-ssh.devin.ai}"; }
+control_path() { printf '%s/cm-%s' "$STATE_DIR" "${1:0:16}"; }
+ssh_base() { # SID -> ssh command line (without host) that only reuses the master
+  printf '/usr/bin/ssh -o ControlPath=%s -o ControlMaster=no -o BatchMode=yes -T' "$(control_path "$1")"
+}
+
+master_alive() {
+  /usr/bin/ssh -o "ControlPath=$(control_path "$1")" -O check "$(ssh_host "$1")" >/dev/null 2>&1
+}
+
+open_master() { # SID -> 0 once an authenticated master connection exists
+  local sid="$1"
+  master_alive "$sid" && return 0
+  ensure_host_key
+  mkdir -p "$STATE_DIR"
+  PATH="$ROOT/libexec:$PATH" DVM_CONTROL_PATH="$(control_path "$sid")" \
+    with_timeout 180 devin ssh "$sid" true </dev/null >/dev/null 2>&1 || return 1
+  master_alive "$sid"
+}
+
+close_master() {
+  master_alive "$1" || return 0
+  /usr/bin/ssh -o "ControlPath=$(control_path "$1")" -O exit "$(ssh_host "$1")" >/dev/null 2>&1 || true
+}
+
+# Runs CMD over the master. Devin suspends idle sessions even while SSH work is running,
+# which drops the connection; when CMD fails *and* the master is gone, log in again (this
+# also wakes the session) and retry once. A command that merely fails is not retried.
+with_reconnect() { # SID CMD...
+  local sid="$1" rc=0
+  shift
+  open_master "$sid" || die "cannot open an SSH connection to $sid (try 'dvm wait' or 'dvm status')"
+  "$@" || rc=$?
+  if (( rc != 0 )) && ! master_alive "$sid"; then
+    echo "dvm: connection to $sid dropped (the session probably went to sleep); reconnecting and retrying once" >&2
+    open_master "$sid" || die "cannot reconnect to $sid"
+    rc=0
+    "$@" || rc=$?
+  fi
+  return "$rc"
+}
+
 remote_ssh() { # SID REMOTE_COMMAND...
   local sid="$1"
   shift
-  devin ssh "$sid" "$@"
+  with_reconnect "$sid" $(ssh_base "$sid") "$(ssh_host "$sid")" "$@"
 }
 
 remote_cmd() { # DIR CMD... -> single zsh -lc string; one argument is taken as a shell script
@@ -207,11 +270,6 @@ cmd_run() {
   remote_ssh "$(session)" "$(remote_cmd "$dir" "$@")"
 }
 
-cmd_rsh() { # rsync transport: dvm _rsh HOST CMD...
-  shift
-  remote_ssh "$(session)" "$@"
-}
-
 cmd_push() {
   local local_dir="" remote_dir="" excludes=(node_modules/ .build/ DerivedData/ build/ .DS_Store .state/)
   while [[ $# -gt 0 ]]; do
@@ -222,19 +280,21 @@ cmd_push() {
   done
   local_dir="$(cd "${local_dir:-.}" && pwd)"
   remote_dir="${remote_dir:-work/$(basename "$local_dir")}"
-  local args=(-az --delete -e "$SELF _rsh")
-  local pattern
+  local sid pattern
+  sid="$(session)"
+  remote_ssh "$sid" "mkdir -p $remote_dir"
+  local args=(-az --delete -e "$(ssh_base "$sid")")
   for pattern in "${excludes[@]}"; do args+=(--exclude "$pattern"); done
-  remote_ssh "$(session)" "mkdir -p $remote_dir"
-  rsync "${args[@]}" "$local_dir/" "dvm:$remote_dir/"
+  with_reconnect "$sid" rsync "${args[@]}" "$local_dir/" "$(ssh_host "$sid"):$remote_dir/"
   echo "pushed $local_dir -> ~/$remote_dir"
 }
 
 cmd_pull() {
   [[ $# -ge 1 ]] || die "pull: missing REMOTE_PATH"
-  local remote="$1" dest="${2:-./dvm-artifacts/}"
+  local remote="$1" dest="${2:-./dvm-artifacts/}" sid
+  sid="$(session)"
   mkdir -p "$dest"
-  rsync -az -e "$SELF _rsh" "dvm:$remote" "$dest"
+  with_reconnect "$sid" rsync -az -e "$(ssh_base "$sid")" "$(ssh_host "$sid"):$remote" "$dest"
   echo "pulled ~/$remote -> $dest"
 }
 
@@ -279,7 +339,6 @@ main() {
     forward) cmd_forward "$@" ;;
     shell) cmd_shell ;;
     doctor) cmd_doctor ;;
-    _rsh) cmd_rsh "$@" ;;
     help|-h|--help) usage ;;
     *) usage >&2; exit 2 ;;
   esac
