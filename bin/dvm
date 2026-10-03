@@ -208,12 +208,15 @@ master_alive() {
 }
 
 open_master() { # SID -> 0 once an authenticated master connection exists
-  local sid="$1"
+  local sid="$1" pty=()
   master_alive "$sid" && return 0
   ensure_host_key
   mkdir -p "$STATE_DIR"
+  # `devin ssh` opens /dev/tty for its login and fails with "Device not configured" where
+  # there is no terminal (launchd jobs, agent shells); script(1) gives it a pseudo-terminal.
+  [[ "$(uname -s)" == Darwin ]] && pty=(/usr/bin/script -q /dev/null)
   PATH="$ROOT/libexec:$PATH" DVM_CONTROL_PATH="$(control_path "$sid")" \
-    with_timeout 180 devin ssh "$sid" true </dev/null >/dev/null 2>&1 || return 1
+    with_timeout 180 ${pty[@]+"${pty[@]}"} devin ssh "$sid" true </dev/null >/dev/null 2>&1 || return 1
   master_alive "$sid"
 }
 
