@@ -76,7 +76,8 @@ otherwise pass arguments directly.
 - Devin suspends the session when its agent is idle, and SSH work does not count as activity:
   the VM can go to sleep in the middle of a command. Running processes (builds, dev servers,
   simulators) stop; disk contents survive. `dvm` then logs in again (which wakes the VM, about
-  30-40 s) and retries the interrupted command once, so keep commands safe to re-run.
+  30-70 s; up to `DVM_RECONNECT_TRIES`=3 logins, 15 s apart) and retries the interrupted
+  command once, so keep commands safe to re-run.
 - The first connection adds the `ssh.devin.ai` host key to `~/.ssh/known_hosts`.
 - Transport: `devin ssh` is used only to log in; commands and rsync reuse that login through an
   OpenSSH ControlMaster under `.state/`, so connections after the first take about a second.

@@ -237,7 +237,12 @@ with_reconnect() { # SID CMD...
   if (( rc == 255 )) || { (( rc != 0 )) && ! master_alive "$sid"; }; then
     echo "dvm: connection to $sid failed (the session probably went to sleep); reconnecting and retrying once" >&2
     close_master "$sid"
-    open_master "$sid" || die "cannot reconnect to $sid"
+    local attempt=1 tries="${DVM_RECONNECT_TRIES:-3}"
+    until open_master "$sid"; do
+      (( attempt++ < tries )) || die "cannot reconnect to $sid after $tries logins"
+      echo "dvm: login to $sid failed while it wakes; trying again in ${DVM_RECONNECT_PAUSE:-15}s" >&2
+      sleep "${DVM_RECONNECT_PAUSE:-15}"
+    done
     rc=0
     "$@" || rc=$?
   fi
