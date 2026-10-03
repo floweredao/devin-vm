@@ -222,16 +222,18 @@ close_master() {
   /usr/bin/ssh -o "ControlPath=$(control_path "$1")" -O exit "$(ssh_host "$1")" >/dev/null 2>&1 || true
 }
 
-# Runs CMD over the master. Devin suspends idle sessions even while SSH work is running,
-# which drops the connection; when CMD fails *and* the master is gone, log in again (this
-# also wakes the session) and retry once. A command that merely fails is not retried.
+# Runs CMD over the master. Devin suspends idle sessions even while SSH work is running.
+# The local master can then die, or stay alive while the gateway refuses every new session
+# on it (ssh exits 255). In either case close the master, log in again (this also wakes the
+# session) and retry once. A command that merely fails is not retried.
 with_reconnect() { # SID CMD...
   local sid="$1" rc=0
   shift
   open_master "$sid" || die "cannot open an SSH connection to $sid (try 'dvm wait' or 'dvm status')"
   "$@" || rc=$?
-  if (( rc != 0 )) && ! master_alive "$sid"; then
-    echo "dvm: connection to $sid dropped (the session probably went to sleep); reconnecting and retrying once" >&2
+  if (( rc == 255 )) || { (( rc != 0 )) && ! master_alive "$sid"; }; then
+    echo "dvm: connection to $sid failed (the session probably went to sleep); reconnecting and retrying once" >&2
+    close_master "$sid"
     open_master "$sid" || die "cannot reconnect to $sid"
     rc=0
     "$@" || rc=$?
