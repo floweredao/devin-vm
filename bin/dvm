@@ -7,7 +7,7 @@ STATE_DIR="${DVM_STATE_DIR:-$ROOT/.state}"
 [[ "$STATE_DIR" != *[[:space:]]* ]] || { echo "dvm: state dir path must not contain spaces: $STATE_DIR" >&2; exit 1; }
 CURRENT_FILE="$STATE_DIR/current"
 API_BASE="${DEVIN_API_BASE:-https://api.devin.ai}"
-HOLD_PROMPT='This session is a remote macOS build/QA machine that another agent drives over SSH. Do not start any work, do not edit files, do not open pull requests, and do not run commands. Reply with the single word "ready" and then wait silently.'
+HOLD_PROMPT='This session is a remote macOS build/QA machine that another agent drives over SSH. Do not start any work, do not edit files, do not open pull requests, and do not run commands. Reply with the single word "ready" and then wait silently. Later messages are only keep-alive pings: answer each with a single "." and keep waiting.'
 
 die() { echo "dvm: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not installed"; }
@@ -17,8 +17,11 @@ usage() {
 dvm - drive a Devin Cloud macOS VM from a local agent session
 
 Session
-  dvm up [--repo owner/repo]... [--title T] [--platform macos]
-                              create a VM session, make it current, wait for SSH
+  dvm up [--repo owner/repo]... [--title T] [--platform macos] [--mode M]
+                              create a VM session, make it current, wait for SSH;
+                              M is the devin_mode (e.g. swe-2-medium), default the org's
+  dvm wake                    keep a swe-2-* session awake about 30 min by sending a
+                              "." message (warns and sends nothing for other modes)
   dvm use <session-id|url>    make an existing session current
   dvm current                 print the current session id
   dvm status                  show status, usage, and URL of the current session
@@ -113,17 +116,19 @@ set_current() {
 }
 
 cmd_up() {
-  local platform="macos" title="dvm remote mac" repos=() body response sid url
+  local platform="macos" title="dvm remote mac" mode="" repos=() body response sid url
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --repo) repos+=("$2"); shift 2 ;;
+      --mode) mode="$2"; shift 2 ;;
       --title) title="$2"; shift 2 ;;
       --platform) platform="$2"; shift 2 ;;
       *) die "up: unknown argument '$1'" ;;
     esac
   done
-  body="$(jq -n --arg prompt "$HOLD_PROMPT" --arg title "$title" --arg platform "$platform" \
+  body="$(jq -n --arg prompt "$HOLD_PROMPT" --arg title "$title" --arg platform "$platform" --arg mode "$mode" \
     --args '{prompt: $prompt, title: $title, platform: $platform, tags: ["dvm"]}
+            + (if $mode != "" then {devin_mode: $mode} else {} end)
             + (if ($ARGS.positional | length) > 0 then {repos: $ARGS.positional} else {} end)' \
     ${repos[@]+"${repos[@]}"})"
   response="$(api POST "/v3/organizations/$(org_id)/sessions" "$body")"
@@ -144,7 +149,23 @@ cmd_use() {
 
 cmd_status() {
   api GET "/v3/organizations/$(org_id)/sessions/$(session)" |
-    jq -r '"session  \(.session_id)\nstatus   \(.status) \(.status_detail // "")\nusage    \(.acus_consumed)\nurl      \(.url)"'
+    jq -r '"session  \(.session_id)\nmode     \(.devin_mode // "?")\nstatus   \(.status) \(.status_detail // "")\nusage    \(.acus_consumed)\nurl      \(.url)"'
+}
+
+# SSH logins wake a sleeping session only for a few minutes, while an agent message restarts
+# its 30-minute idle timer. A "." costs little only in swe-2-* sessions, so other modes are
+# left alone.
+cmd_wake() {
+  local sid org mode
+  sid="$(session)"
+  org="$(org_id)"
+  mode="$(api GET "/v3/organizations/$org/sessions/$sid" | jq -r '.devin_mode // "unknown"')"
+  case "$mode" in
+    swe-2-*)
+      api POST "/v3/organizations/$org/sessions/$sid/messages" '{"message":"."}' >/dev/null
+      echo "woke $sid ($mode)" ;;
+    *) echo "dvm: wake: $sid is a $mode session; not sending a message (only swe-2-* sessions)" >&2 ;;
+  esac
 }
 
 cmd_wait() {
@@ -341,6 +362,7 @@ main() {
     current) session; echo ;;
     status) cmd_status ;;
     wait) cmd_wait "$@" ;;
+    wake) cmd_wake ;;
     sleep) cmd_sleep ;;
     down) cmd_down ;;
     run) cmd_run "$@" ;;

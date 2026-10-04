@@ -26,7 +26,7 @@ Binary: `/Users/o3-peter/Documents/omo/devin-vm/bin/dvm` (below, `dvm`).
 1. `dvm doctor` - confirm CLI, auth, API, and whether a current session exists.
 2. `dvm up` - only when there is no usable current session. Creates a macOS session, stores it
    as current, and waits for SSH. Reuse the current session across tasks instead of creating
-   new ones.
+   new ones. `dvm up --mode swe-2-medium` creates it in SWE-2 mode, which `dvm wake` needs.
 3. `dvm push [LOCAL_DIR] [REMOTE_DIR]` - rsync the project (default remote `~/work/<name>`;
    excludes node_modules, .build, DerivedData, build, .DS_Store). Push again after local edits.
 4. `dvm run --cd work/<name> -- <command...>` - runs in a login zsh; the exit code is the
@@ -78,6 +78,9 @@ otherwise pass arguments directly.
   simulators) stop; disk contents survive. `dvm` then logs in again (which wakes the VM, about
   30-70 s; up to `DVM_RECONNECT_TRIES`=3 logins, 15 s apart) and retries the interrupted
   command once, so keep commands safe to re-run.
+- `dvm wake` keeps a `swe-2-*` session awake for about 30 minutes by sending the agent a "."
+  message (an SSH login wakes it only for a few minutes). For any other mode it only warns.
+  Use it for long commands (macrun does: once after 4 minutes, then every 25).
 - The first connection adds the `ssh.devin.ai` host key to `~/.ssh/known_hosts`.
 - Transport: `devin ssh` is used only to log in; commands and rsync reuse that login through an
   OpenSSH ControlMaster under `.state/`, so connections after the first take about a second.
@@ -88,4 +91,5 @@ otherwise pass arguments directly.
 - Code and any secrets pushed leave the machine for Cognition's cloud. Do not push `.env` files
   or credentials unless the user asked.
 - Usage: the session counts against the user's Devin quota (mostly agent activity; VM time is a
-  small fraction). Never message the Devin agent in the session; that spends quota.
+  small fraction). Never message the Devin agent in the session beyond `dvm wake`; that spends
+  quota.
