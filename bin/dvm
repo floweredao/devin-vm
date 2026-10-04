@@ -20,7 +20,7 @@ Session
   dvm up [--repo owner/repo]... [--title T] [--platform macos] [--mode M]
                               create a VM session, make it current, wait for SSH;
                               M is the devin_mode (e.g. swe-2-medium), default the org's
-  dvm wake                    keep a swe-2-* session awake about 30 min by sending a
+  dvm wake                    keep a swe-2-* session awake about 5 more min by sending a
                               "." message (warns and sends nothing for other modes)
   dvm use <session-id|url>    make an existing session current
   dvm current                 print the current session id
@@ -152,9 +152,9 @@ cmd_status() {
     jq -r '"session  \(.session_id)\nmode     \(.devin_mode // "?")\nstatus   \(.status) \(.status_detail // "")\nusage    \(.acus_consumed)\nurl      \(.url)"'
 }
 
-# SSH logins wake a sleeping session only for a few minutes, while an agent message restarts
-# its 30-minute idle timer. A "." costs little only in swe-2-* sessions, so other modes are
-# left alone.
+# The VM sleeps about 5 minutes after the agent's last reply, even while SSH work runs; an
+# agent message starts that clock again. A "." costs little only in swe-2-* sessions, so other
+# modes are left alone.
 cmd_wake() {
   local sid org mode
   sid="$(session)"

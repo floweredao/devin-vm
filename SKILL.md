@@ -78,9 +78,10 @@ otherwise pass arguments directly.
   simulators) stop; disk contents survive. `dvm` then logs in again (which wakes the VM, about
   30-70 s; up to `DVM_RECONNECT_TRIES`=3 logins, 15 s apart) and retries the interrupted
   command once, so keep commands safe to re-run.
-- `dvm wake` keeps a `swe-2-*` session awake for about 30 minutes by sending the agent a "."
-  message (an SSH login wakes it only for a few minutes). For any other mode it only warns.
-  Use it for long commands (macrun does: once after 4 minutes, then every 25).
+- The VM sleeps about 5 minutes after the agent's last reply, even mid-command. `dvm wake`
+  sends the agent of a `swe-2-*` session a ".", which starts those 5 minutes again; for any
+  other mode it only warns. Use it for long commands (macrun does: after 4 minutes, then
+  every 4 minutes until the command ends).
 - The first connection adds the `ssh.devin.ai` host key to `~/.ssh/known_hosts`.
 - Transport: `devin ssh` is used only to log in; commands and rsync reuse that login through an
   OpenSSH ControlMaster under `.state/`, so connections after the first take about a second.
