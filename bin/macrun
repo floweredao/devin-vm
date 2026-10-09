@@ -1,0 +1,226 @@
+#!/bin/bash
+set -o pipefail
+
+# Resolve symlinks so an installed link (~/.local/bin/macrun) still finds the dvm next to it.
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+HOME_DIR="$HOME"
+CONFIG="${MAC_OFFLOAD_CONFIG:-$HOME_DIR/.config/mac-offload/devin.env}"
+[ -f "$CONFIG" ] && . "$CONFIG"
+DVM="${DVM:-$SCRIPT_DIR/dvm}"
+DVM_ACTIVE_WINDOW="${DVM_ACTIVE_WINDOW:-10800}"
+STATE_DIR="${MACRUN_STATE_DIR:-$HOME_DIR/.local/state/mac-offload}"
+CACHE_DIR="${MACRUN_CACHE_DIR:-$HOME_DIR/.cache/mac-offload/macrun}"
+LOG_DIR="${MACRUN_LOG_DIR:-$HOME_DIR/Library/Logs/mac-offload/macrun}"
+# The Devin VM sleeps about 5 minutes after its agent last replied, even mid-run; a "." message
+# (dvm wake, swe-2-* only) starts those 5 minutes again. A run longer than DVM_WAKE_AFTER seconds
+# sends one, then one every DVM_WAKE_EVERY seconds. 0 turns this off.
+DVM_WAKE_AFTER="${DVM_WAKE_AFTER:-240}"
+DVM_WAKE_EVERY="${DVM_WAKE_EVERY:-240}"
+DVM_WAKE_TICK="${DVM_WAKE_TICK:-5}"
+WAKE_LOG="${MACRUN_WAKE_LOG:-$LOG_DIR/wake.log}"
+
+usage() {
+  echo "Usage: macrun [--no-sync] <local_dir> <command string...>"
+  echo "       macrun --status | --awake DURATION | --help"
+}
+epoch() { date +%s; }
+set_window() {
+  local now current target
+  now="$(epoch)"
+  current=0
+  [ -f "$STATE_DIR/devin-active-until" ] && current="$(cat "$STATE_DIR/devin-active-until" 2>/dev/null)"
+  case "$current" in ''|*[!0-9]*) current=0 ;; esac
+  target=$((now + DVM_ACTIVE_WINDOW))
+  [ "$current" -gt "$target" ] && target="$current"
+  mkdir -p "$STATE_DIR"
+  printf '%s\n' "$target" > "$STATE_DIR/devin-active-until"
+}
+duration_seconds() {
+  case "$1" in
+    0) echo 0 ;;
+    *h) echo $(( ${1%h} * 3600 )) ;;
+    *m) echo $(( ${1%m} * 60 )) ;;
+    *) return 1 ;;
+  esac
+}
+
+# Runs under $STATE_DIR/dvm-wake.lock, shared by every macrun. Sends a wake unless the current
+# session got one less than DVM_WAKE_EVERY seconds ago (from any macrun), and prints when the
+# next wake is due.
+wake_tick() {
+  local sid stamp last now out rc action
+  now="$(epoch)"
+  sid="$("$DVM" current 2>/dev/null)" && [ -n "$sid" ] || { echo $((now + DVM_WAKE_EVERY)); return 0; }
+  stamp="$STATE_DIR/dvm-wake-$sid"
+  last="$(cat "$stamp" 2>/dev/null)"
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  mkdir -p "$(dirname "$WAKE_LOG")"
+  if [ $((now - last)) -lt "$DVM_WAKE_EVERY" ]; then
+    action=skip
+  else
+    out="$(perl -e 'alarm shift; exec @ARGV' 60 "$DVM" wake 2>&1)"; rc=$?
+    if [ "$rc" -ne 0 ]; then action="error rc=$rc"
+    else
+      last="$now"; printf '%s\n' "$now" > "$stamp"
+      case "$out" in woke*) action=sent ;; *) action=not-swe2 ;; esac
+    fi
+    echo "macrun: wake $sid: $action" >&2
+  fi
+  printf '%s session=%s action=%s pid=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$sid" "$action" "${MACRUN_WAKE_FOR:-$PPID}" >> "$WAKE_LOG"
+  last=$((last + DVM_WAKE_EVERY))
+  [ "$last" -gt "$now" ] || last=$((now + DVM_WAKE_EVERY))
+  echo "$last"
+}
+
+# Background loop for the length of one run; ends when stopped or when this macrun is gone.
+start_wake_timer() {
+  wake_timer=""
+  [ "$DVM_WAKE_AFTER" -gt 0 ] 2>/dev/null || return 0
+  (
+    nap=""
+    trap '[ -n "$nap" ] && kill "$nap" 2>/dev/null; exit 0' TERM
+    next=$(( $(epoch) + DVM_WAKE_AFTER ))
+    while kill -0 $$ 2>/dev/null; do
+      if [ "$(epoch)" -ge "$next" ]; then
+        next="$(MACRUN_WAKE_FOR=$$ /usr/bin/lockf -k -t 120 "$STATE_DIR/dvm-wake.lock" "$0" --wake-tick)"
+        case "$next" in ''|*[!0-9]*) next=$(( $(epoch) + DVM_WAKE_EVERY )) ;; esac
+      fi
+      sleep "$DVM_WAKE_TICK" & nap=$!
+      wait "$nap"
+    done
+  ) </dev/null >/dev/null &
+  wake_timer=$!
+}
+stop_wake_timer() {
+  [ -n "${wake_timer:-}" ] || return 0
+  kill "$wake_timer" 2>/dev/null
+  wait "$wake_timer" 2>/dev/null
+  wake_timer=""
+}
+
+case "${1:-}" in
+  --help|-h) usage; exit 0 ;;
+  --status)
+    "$DVM" status
+    printf 'active-until '
+    if [ -f "$STATE_DIR/devin-active-until" ]; then cat "$STATE_DIR/devin-active-until"; else echo 0; fi
+    exit 0 ;;
+  --awake)
+    seconds="$(duration_seconds "${2:-}")" || { usage >&2; exit 2; }
+    mkdir -p "$STATE_DIR"
+    if [ "$seconds" -eq 0 ]; then printf '0\n' > "$STATE_DIR/devin-active-until"
+    else DVM_ACTIVE_WINDOW="$seconds"; set_window
+    fi
+    exit 0 ;;
+  --wake-tick) mkdir -p "$STATE_DIR"; wake_tick; exit 0 ;;
+esac
+
+no_sync=0
+if [ "${1:-}" = "--no-sync" ]; then no_sync=1; shift; fi
+[ "$#" -ge 2 ] || { usage >&2; exit 2; }
+local_dir="$1"; shift
+[ -d "$local_dir" ] || { echo "macrun: not a directory: $local_dir" >&2; exit 2; }
+command_string="$*"
+absolute_dir="$(cd "$local_dir" && pwd -P)" || exit 2
+base="$(basename "$absolute_dir")"
+path_hash="$(printf '%s' "$absolute_dir" | shasum -a 256 | cut -c1-8)"
+name="$base-$path_hash"
+
+if [ "${MACRUN_LOCKED:-0}" != 1 ] && [ "${MACRUN_STAGE_ONLY:-0}" != 1 ]; then
+  mkdir -p "$STATE_DIR"
+  set -- "$local_dir" "$command_string"
+  [ "$no_sync" -eq 0 ] || set -- --no-sync "$@"
+  exec /usr/bin/lockf -k -t 3600 "$STATE_DIR/macrun-$name.lock" \
+    env MACRUN_LOCKED=1 "$0" "$@"
+fi
+
+set_window
+staging="$CACHE_DIR/$name"
+rm -rf "$staging"
+mkdir -p "$staging" "$CACHE_DIR"
+list="$STATE_DIR/macrun-files-$$"
+trap 'rm -f "$list"' EXIT
+tracked="$STATE_DIR/macrun-tracked-$$"
+: > "$tracked"
+if git -C "$absolute_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git -C "$absolute_dir" ls-files -z -co --exclude-standard > "$list"
+  git -C "$absolute_dir" ls-files -z > "$tracked"
+else
+  (cd "$absolute_dir" && find . -type f -print0) > "$list"
+fi
+filtered="$STATE_DIR/macrun-filtered-$$"
+dropped="$STATE_DIR/macrun-dropped-$$"
+trap 'rm -f "$list" "$filtered" "$tracked" "$dropped"' EXIT
+MACRUN_LIST="$list" MACRUN_FILTERED="$filtered" MACRUN_TRACKED="$tracked" MACRUN_DROPPED="$dropped" MACRUN_ROOT="$absolute_dir" /usr/bin/python3 -c '
+import os, re
+src, dst = os.environ["MACRUN_LIST"], os.environ["MACRUN_FILTERED"]
+root = os.environ["MACRUN_ROOT"]
+drop_dirs = {".git", "node_modules", "target", ".build", "DerivedData", "build", "data"}
+agent_dirs = {".omo", ".senpi"}
+with open(os.environ["MACRUN_TRACKED"], "rb") as f: tracked = set(f.read().split(b"\0"))
+drop_names = {".env", "Local.xcconfig", ".DS_Store"}
+suffixes = (".p12", ".p8", ".key", ".pem", ".mobileprovision")
+env_templates = {".env.example", ".env.sample", ".env.template"}
+credential_name = re.compile(r"(^|[._-])credentials?([._-]|$)")
+with open(src, "rb") as f: entries = f.read().split(b"\0")
+with open(dst, "wb") as out, open(os.environ["MACRUN_DROPPED"], "wb") as dropped:
+  count = 0
+  for raw in entries:
+    if not raw: continue
+    path = raw.decode("utf-8", "surrogateescape")
+    if path.startswith("./"): path = path[2:]
+    parts = path.split("/")
+    name = parts[-1]
+    if any(part in agent_dirs for part in parts) and raw not in tracked:
+      continue
+    if any(part in drop_dirs for part in parts) or name in drop_names or (name.startswith(".env.") and name not in env_templates) or name.endswith(suffixes) or ".keychain" in name or credential_name.search(name.lower()):
+      if raw in tracked: dropped.write(raw + b"\0")
+      continue
+    full = os.path.join(root, path)
+    if not (os.path.islink(full) or os.path.isfile(full)):
+      continue
+    out.write(raw + b"\0"); count += 1
+print(count)
+' > "$STATE_DIR/macrun-count-$$"
+count="$(cat "$STATE_DIR/macrun-count-$$")"
+rm -f "$STATE_DIR/macrun-count-$$"
+(cd "$absolute_dir" && COPYFILE_DISABLE=1 tar --no-mac-metadata -n -cf - --null -T "$filtered") | { tar -xf - -C "$staging" && cat >/dev/null; } || exit 1
+# Tests and build scripts often read git (rev-parse HEAD, ls-files, status). Give the copy a
+# one-commit .git at the same HEAD, unless a tracked file was left out: its contents would
+# still travel inside the git objects.
+if [ -s "$tracked" ] && [ "${MACRUN_GIT:-1}" = 1 ]; then
+  if [ -s "$dropped" ]; then
+    echo "macrun: no git metadata sent; $(tr -cd '\0' < "$dropped" | wc -c | tr -d ' ') tracked file(s) are excluded, e.g. $(tr '\0' '\n' < "$dropped" | head -3 | tr '\n' ' ')" >&2
+  elif ! { head="$(git -C "$absolute_dir" rev-parse -q --verify HEAD)" && git -C "$staging" init -q &&
+           git -C "$staging" fetch -q --depth 1 --no-tags "$absolute_dir" "$head" && git -C "$staging" reset -q "$head"; }; then
+    echo "macrun: could not add git metadata; continuing without it" >&2
+    rm -rf "$staging/.git"
+  fi
+fi
+if [ "${MACRUN_STAGE_ONLY:-0}" = 1 ]; then echo "staged $count files at $staging"; exit 0; fi
+# Optional hook: a launchd keep-alive job that cannot read ~/Documents can ship a dvm-vendor.sh
+# that copies dvm and its session state elsewhere. Without it, nothing happens here.
+vendor_lib="${MAC_OFFLOAD_LIB:-$SCRIPT_DIR/../share/mac-offload/lib}/dvm-vendor.sh"
+if [ -f "$vendor_lib" ]; then . "$vendor_lib"; dvm_vendor_sync; fi
+if [ "$no_sync" -eq 0 ]; then "$DVM" push "$staging" "work/macrun/$name" --exclude target/ --exclude .swiftpm/ || exit $?; fi
+toolchain_prefix=""
+if [ "${MACRUN_DEVELOPER_DIR:-auto}" = auto ]; then
+  want="$(xcrun swift --version 2>/dev/null | sed -n 's/.*(\(swiftlang-[^ ]*\).*/\1/p' | head -1)"
+  if [ -n "$want" ]; then
+    toolchain_prefix="for x in /Applications/Xcode*.app; do case \"\$(DEVELOPER_DIR=\$x/Contents/Developer xcrun swift --version 2>&1)\" in *$want*) export DEVELOPER_DIR=\$x/Contents/Developer; break;; esac; done; echo \"macrun: remote toolchain \${DEVELOPER_DIR:-default} (local $want)\" >&2; "
+  fi
+elif [ "${MACRUN_DEVELOPER_DIR}" != none ]; then
+  toolchain_prefix="export DEVELOPER_DIR=$(printf '%q' "$MACRUN_DEVELOPER_DIR"); "
+fi
+command_string="$toolchain_prefix$command_string"
+mkdir -p "$LOG_DIR"
+timestamp="$(date +%Y%m%d-%H%M%S)"
+log="$LOG_DIR/$timestamp-$name.log"
+trap 'rm -f "$list" "$filtered" "$tracked" "$dropped"; stop_wake_timer' EXIT
+start_wake_timer
+"$DVM" run --cd "work/macrun/$name" -- "$command_string" 2>&1 | tee "$log"
+rc="${PIPESTATUS[0]}"
+stop_wake_timer
+set_window
+echo "macrun: exit $rc (log $log)" >&2
+exit "$rc"

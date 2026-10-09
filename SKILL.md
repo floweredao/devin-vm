@@ -10,7 +10,11 @@ Chrome, Homebrew, Node/Python/Rust) as a remote build and QA machine. The VM bel
 Devin session; `dvm` creates that session with a "do nothing, wait" prompt so the Devin agent
 stays idle and the VM is used only through SSH.
 
-Binary: `/Users/o3-peter/Documents/omo/devin-vm/bin/dvm` (below, `dvm`).
+Binaries: `bin/dvm` and `bin/macrun` in this repo (`install.sh` links them onto PATH as `dvm`
+and `macrun`). For a one-shot "copy this project, run this, give me the exit code", prefer
+`macrun <local_dir> '<command>'`: it uploads a copy without secrets, picks the matching Xcode,
+keeps a SWE-2 session awake during long runs, and logs to `~/Library/Logs/mac-offload/macrun/`.
+The steps below are the lower-level `dvm` workflow.
 
 ## Prerequisites
 
