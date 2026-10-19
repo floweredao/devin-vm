@@ -209,7 +209,7 @@ ensure_host_key() {
   echo "dvm: added $host host key: $(ssh-keygen -lf <(ssh-keyscan -t ed25519 "$host" 2>/dev/null) | awk '{print $2}')" >&2
 }
 
-with_timeout() { # SECONDS CMD... (macOS has no timeout(1))
+with_timeout() { # SECONDS CMD... (macOS has no timeout(1); perl works on both)
   perl -e 'alarm shift; exec @ARGV or die "exec failed: $!"' "$@"
 }
 
@@ -229,15 +229,21 @@ master_alive() {
 }
 
 open_master() { # SID -> 0 once an authenticated master connection exists
-  local sid="$1" pty=()
+  local sid="$1" login
   master_alive "$sid" && return 0
   ensure_host_key
   mkdir -p "$STATE_DIR"
   # `devin ssh` opens /dev/tty for its login and fails with "Device not configured" where
-  # there is no terminal (launchd jobs, agent shells); script(1) gives it a pseudo-terminal.
-  [[ "$(uname -s)" == Darwin ]] && pty=(/usr/bin/script -q /dev/null)
+  # there is no terminal (launchd jobs, agent shells, WSL); script(1) gives it a
+  # pseudo-terminal. BSD script takes the command as arguments, util-linux script as -c.
+  login=(devin ssh "$sid" true)
+  if [[ "$(uname -s)" == Darwin ]]; then
+    login=(/usr/bin/script -q /dev/null "${login[@]}")
+  elif command -v script >/dev/null 2>&1; then
+    login=(script -qec "$(printf '%q ' "${login[@]}")" /dev/null)
+  fi
   PATH="$ROOT/libexec:$PATH" DVM_CONTROL_PATH="$(control_path "$sid")" \
-    with_timeout 180 ${pty[@]+"${pty[@]}"} devin ssh "$sid" true </dev/null >/dev/null 2>&1 || return 1
+    with_timeout 180 "${login[@]}" </dev/null >/dev/null 2>&1 || return 1
   master_alive "$sid"
 }
 
