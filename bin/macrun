@@ -10,7 +10,13 @@ DVM="${DVM:-$SCRIPT_DIR/dvm}"
 DVM_ACTIVE_WINDOW="${DVM_ACTIVE_WINDOW:-10800}"
 STATE_DIR="${MACRUN_STATE_DIR:-$HOME_DIR/.local/state/mac-offload}"
 CACHE_DIR="${MACRUN_CACHE_DIR:-$HOME_DIR/.cache/mac-offload/macrun}"
-LOG_DIR="${MACRUN_LOG_DIR:-$HOME_DIR/Library/Logs/mac-offload/macrun}"
+# macOS (BSD tools) or Linux, including WSL on Windows (GNU tar, util-linux flock).
+OS="$(uname -s)"
+if [ "$OS" = Darwin ]; then
+  LOG_DIR="${MACRUN_LOG_DIR:-$HOME_DIR/Library/Logs/mac-offload/macrun}"
+else
+  LOG_DIR="${MACRUN_LOG_DIR:-$HOME_DIR/.local/state/mac-offload/logs/macrun}"
+fi
 # The Devin VM sleeps about 5 minutes after its agent last replied, even mid-run; a "." message
 # (dvm wake, swe-2-* only) starts those 5 minutes again. A run longer than DVM_WAKE_AFTER seconds
 # sends one, then one every DVM_WAKE_EVERY seconds. 0 turns this off.
@@ -24,6 +30,11 @@ usage() {
   echo "       macrun --status | --awake DURATION | --help"
 }
 epoch() { date +%s; }
+lock_cmd() { # SECONDS LOCKFILE -> sets LOCK to a command prefix that runs a command under the lock
+  if [ "$OS" = Darwin ]; then LOCK=(/usr/bin/lockf -k -t "$1" "$2")
+  else LOCK=(flock -w "$1" "$2")
+  fi
+}
 set_window() {
   local now current target
   now="$(epoch)"
@@ -82,7 +93,8 @@ start_wake_timer() {
     next=$(( $(epoch) + DVM_WAKE_AFTER ))
     while kill -0 $$ 2>/dev/null; do
       if [ "$(epoch)" -ge "$next" ]; then
-        next="$(MACRUN_WAKE_FOR=$$ /usr/bin/lockf -k -t 120 "$STATE_DIR/dvm-wake.lock" "$0" --wake-tick)"
+        lock_cmd 120 "$STATE_DIR/dvm-wake.lock"
+        next="$(MACRUN_WAKE_FOR=$$ "${LOCK[@]}" "$0" --wake-tick)"
         case "$next" in ''|*[!0-9]*) next=$(( $(epoch) + DVM_WAKE_EVERY )) ;; esac
       fi
       sleep "$DVM_WAKE_TICK" & nap=$!
@@ -123,15 +135,16 @@ local_dir="$1"; shift
 command_string="$*"
 absolute_dir="$(cd "$local_dir" && pwd -P)" || exit 2
 base="$(basename "$absolute_dir")"
-path_hash="$(printf '%s' "$absolute_dir" | shasum -a 256 | cut -c1-8)"
+if command -v shasum >/dev/null 2>&1; then sha256() { shasum -a 256; }; else sha256() { sha256sum; }; fi
+path_hash="$(printf '%s' "$absolute_dir" | sha256 | cut -c1-8)"
 name="$base-$path_hash"
 
 if [ "${MACRUN_LOCKED:-0}" != 1 ] && [ "${MACRUN_STAGE_ONLY:-0}" != 1 ]; then
   mkdir -p "$STATE_DIR"
   set -- "$local_dir" "$command_string"
   [ "$no_sync" -eq 0 ] || set -- --no-sync "$@"
-  exec /usr/bin/lockf -k -t 3600 "$STATE_DIR/macrun-$name.lock" \
-    env MACRUN_LOCKED=1 "$0" "$@"
+  lock_cmd 3600 "$STATE_DIR/macrun-$name.lock"
+  exec "${LOCK[@]}" env MACRUN_LOCKED=1 "$0" "$@"
 fi
 
 set_window
@@ -151,7 +164,9 @@ fi
 filtered="$STATE_DIR/macrun-filtered-$$"
 dropped="$STATE_DIR/macrun-dropped-$$"
 trap 'rm -f "$list" "$filtered" "$tracked" "$dropped"' EXIT
-MACRUN_LIST="$list" MACRUN_FILTERED="$filtered" MACRUN_TRACKED="$tracked" MACRUN_DROPPED="$dropped" MACRUN_ROOT="$absolute_dir" /usr/bin/python3 -c '
+python=/usr/bin/python3
+[ "$OS" = Darwin ] || python="$(command -v python3)" || { echo "macrun: python3 is required" >&2; exit 1; }
+MACRUN_LIST="$list" MACRUN_FILTERED="$filtered" MACRUN_TRACKED="$tracked" MACRUN_DROPPED="$dropped" MACRUN_ROOT="$absolute_dir" "$python" -c '
 import os, re
 src, dst = os.environ["MACRUN_LIST"], os.environ["MACRUN_FILTERED"]
 root = os.environ["MACRUN_ROOT"]
@@ -184,7 +199,10 @@ print(count)
 ' > "$STATE_DIR/macrun-count-$$"
 count="$(cat "$STATE_DIR/macrun-count-$$")"
 rm -f "$STATE_DIR/macrun-count-$$"
-(cd "$absolute_dir" && COPYFILE_DISABLE=1 tar --no-mac-metadata -n -cf - --null -T "$filtered") | { tar -xf - -C "$staging" && cat >/dev/null; } || exit 1
+if tar --version 2>/dev/null | grep -q 'GNU tar'; then pack=(tar --no-recursion -cf - --null -T "$filtered")
+else pack=(env COPYFILE_DISABLE=1 tar --no-mac-metadata -n -cf - --null -T "$filtered")
+fi
+(cd "$absolute_dir" && "${pack[@]}") | { tar -xf - -C "$staging" && cat >/dev/null; } || exit 1
 # Tests and build scripts often read git (rev-parse HEAD, ls-files, status). Give the copy a
 # one-commit .git at the same HEAD, unless a tracked file was left out: its contents would
 # still travel inside the git objects.
