@@ -1,0 +1,2 @@
+# Scripts must keep LF endings even when cloned with Git for Windows (core.autocrlf=true).
+* text=auto eol=lf
