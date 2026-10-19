@@ -13,7 +13,9 @@ stays idle and the VM is used only through SSH.
 Binaries: `bin/dvm` and `bin/macrun` in this repo (`install.sh` links them onto PATH as `dvm`
 and `macrun`). For a one-shot "copy this project, run this, give me the exit code", prefer
 `macrun <local_dir> '<command>'`: it uploads a copy without secrets, picks the matching Xcode,
-keeps a SWE-2 session awake during long runs, and logs to `~/Library/Logs/mac-offload/macrun/`.
+keeps a SWE-2 session awake during long runs, and logs to `~/Library/Logs/mac-offload/macrun/`
+(`~/.local/state/mac-offload/logs/macrun/` on Linux). On Windows, both tools run inside WSL;
+follow [`windows/SKILL.md`](windows/SKILL.md) for how to call them and convert paths.
 The steps below are the lower-level `dvm` workflow.
 
 ## Prerequisites

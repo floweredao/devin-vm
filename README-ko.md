@@ -13,7 +13,7 @@ VM은 Devin Cloud 세션이에요(Apple silicon, Xcode, iOS 시뮬레이터, Hom
 
 ## 필요한 것
 
-- macOS와 `git`, `curl`, `rsync`, `ssh`, `perl`, `/usr/bin/python3`(Xcode Command Line Tools), 그리고 `jq`(`brew install jq`).
+- macOS와 `git`, `curl`, `rsync`, `ssh`, `perl`, `/usr/bin/python3`(Xcode Command Line Tools), 그리고 `jq`(`brew install jq`). 윈도우에서는 WSL을 써요. [윈도우 (WSL)](#윈도우-wsl)을 보세요. 리눅스도 WSL과 같은 방법으로 돼요.
 - **Devin Cloud와 Devin API**가 들어 있는 요금제의 Devin 계정. 2026년 10월 기준 [devin.ai/pricing](https://devin.ai/pricing)에는 클라우드 세션과 API가 Pro부터 들어 있고 Free에는 없어요. 그래서 Free 요금제에서는 `dvm`과 `macrun`이 동작하지 않아요.
 - 로그인한 Devin CLI:
 
@@ -31,6 +31,46 @@ git clone https://github.com/floweredao/devin-vm.git && ./devin-vm/install.sh
 ```
 
 `install.sh`는 `dvm`과 `macrun`을 `~/.local/bin`에 링크하고(다른 곳은 `--prefix DIR`), 빠진 도구가 있으면 알려 줘요. 심볼릭 링크가 아닌 파일이 이미 있으면 `--force` 없이는 덮어쓰지 않아요.
+
+## 윈도우 (WSL)
+
+윈도우에서는 모두 WSL 2(우분투) 안에서 돌려요. 오히려 가장 쓸모 있는 경우예요. 윈도우 PC만으로는 iOS·맥 앱을 빌드하거나 테스트할 수 없는데, `macrun`이 그 일을 명령 하나로 맥 VM에 보내 줘요.
+
+윈도우 기본 셸(PowerShell, Git Bash)은 지원하지 않아요. `dvm`은 SSH 로그인 하나를 열어 두고 모든 명령과 `rsync`에 다시 쓰는데(OpenSSH ControlMaster), 윈도우용 OpenSSH에는 이 기능이 없어요. 윈도우에는 `rsync`도 없어요.
+
+1. 관리자 PowerShell에서 WSL과 우분투를 깔아요. 다시 시작하라고 하면 다시 시작하고, 시작 메뉴에서 **Ubuntu**를 열어요:
+
+   ```powershell
+   wsl --install -d Ubuntu
+   ```
+
+2. 우분투 셸에서 도구, Devin CLI(리눅스판), devin-vm을 깔아요:
+
+   ```sh
+   sudo apt update && sudo apt install -y jq curl rsync openssh-client git perl python3 util-linux
+   curl -fsSL https://cli.devin.ai/install.sh | bash
+   git clone https://github.com/floweredao/devin-vm.git ~/devin-vm && ~/devin-vm/install.sh
+   devin auth login
+   ```
+
+   `install.sh`가 `~/.local/bin is not on PATH`라고 하면 우분투 창을 새로 열어요. 우분투의 `~/.profile`이 `~/.local/bin`이 생기면 PATH에 넣어 줘요.
+
+3. 그다음은 맥과 똑같아요. 우분투 셸에서:
+
+   ```sh
+   dvm doctor
+   dvm up --mode swe-2-medium
+   macrun ~/code/MyApp 'xcodebuild test -scheme MyApp -destination "platform=iOS Simulator,name=iPhone 17"'
+   ```
+
+윈도우에서 다른 점:
+
+- **프로젝트 위치.** WSL 홈(`~/code/MyApp`)에 두세요. 윈도우 드라이브의 프로젝트도 `/mnt/c/...`로 돼요(`C:\Users\me\code\MyApp`이면 `/mnt/c/Users/me/code/MyApp`). 다만 읽기가 훨씬 느려요. 윈도우 탐색기에서 WSL 홈은 `\\wsl$\Ubuntu\home\<사용자>`예요.
+- **clone은 WSL 안에서.** Git for Windows로 받으면 줄 끝이 윈도우식으로 바뀌거나 실행 권한이 빠질 수 있어요. 이 저장소는 `.gitattributes`로 LF를 고정했지만, 우분투에서 받으면 둘 다 걱정할 필요가 없어요.
+- **PowerShell이나 윈도우의 에이전트에서는** WSL을 거쳐 불러요: `wsl -e bash -lc "macrun ~/code/MyApp 'swift test'"`.
+- **로그**는 `~/Library/Logs/...` 대신 `~/.local/state/mac-offload/logs/macrun/`에 남아요.
+- 내 컴퓨터에 Xcode가 없으니 `macrun`이 Swift 버전으로 VM의 Xcode를 고르지 못해요. `MACRUN_DEVELOPER_DIR`을 정하지 않으면 VM 기본 Xcode를 써요.
+- 나머지(올리는 파일 거르기, VM 깨워 두기, 다시 연결)는 똑같이 돼요. 맥 전용이던 부분은 리눅스에서 `lockf` 대신 `flock`, `tar --no-mac-metadata` 대신 GNU `tar`, 로그인 터미널에는 util-linux `script`를 써요.
 
 ## 빠른 시작 (5분 정도)
 
@@ -128,7 +168,7 @@ macrun --no-sync ~/code/MyApp 'swift test --filter LoginTests'
 
 - 실기기, 내 인증서로 하는 코드 서명, 실제와 같은 성능 측정은 안 돼요.
 - 로그인된 내 브라우저, 로컬 GUI 자동화, 올려도 된다고 정하지 않은 파일이 필요한 일은 내 맥에서 하세요.
-- `macrun`은 macOS 도구(`lockf`, `tar --no-mac-metadata`)를 써서 맥에서 돌아요. `dvm`은 `bash`, `curl`, `jq`, `rsync`, Devin CLI가 있으면 돼요.
+- `dvm`과 `macrun`은 macOS와 리눅스(윈도우의 WSL 포함)에서 돌아요. 윈도우 기본 셸에서는 안 돼요.
 
 ## 설정
 
@@ -145,16 +185,17 @@ macrun --no-sync ~/code/MyApp 'swift test --filter LoginTests'
 | `DVM_RECONNECT_TRIES` | `3` | VM이 깨어날 때 로그인을 몇 번 시도할지 |
 | `MACRUN_GIT` | `1` | `0`이면 git 정보를 보내지 않아요 |
 | `MACRUN_DEVELOPER_DIR` | `auto` | VM의 Xcode: `auto`, `none`, 또는 경로 |
-| `MACRUN_LOG_DIR` | `~/Library/Logs/mac-offload/macrun` | 실행 로그 |
+| `MACRUN_LOG_DIR` | `~/Library/Logs/mac-offload/macrun`(리눅스/WSL: `~/.local/state/mac-offload/logs/macrun`) | 실행 로그 |
 
 ## 테스트
 
 ```sh
 tests/macrun-test.sh          # 오프라인, dvm은 가짜
 tests/mode-wake-test.sh       # 오프라인, API는 가짜
+tests/login-pty-test.sh       # 오프라인, devin은 가짜
 tests/reconnect-retry-live.sh # 실제 세션 필요
 ```
 
 ## AI 에이전트용
 
-[`SKILL.md`](SKILL.md)는 같은 흐름을 적은 에이전트 스킬이에요. 이 폴더를 에이전트의 skills 폴더에 링크해서 쓰면 돼요.
+[`SKILL.md`](SKILL.md)는 같은 흐름을 적은 에이전트 스킬이에요. 이 폴더를 에이전트의 skills 폴더에 링크해서 쓰면 돼요. 윈도우에서 도는 에이전트라면 대신 [`windows/`](windows/SKILL.md)를 링크하세요. 모든 명령을 WSL을 거쳐 돌려요.

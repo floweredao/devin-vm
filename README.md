@@ -13,7 +13,7 @@ The VM is a Devin Cloud session (Apple silicon, Xcode, iOS simulators, Homebrew,
 
 ## Requirements
 
-- macOS with `git`, `curl`, `rsync`, `ssh`, `perl`, and `/usr/bin/python3` (Xcode Command Line Tools), plus `jq` (`brew install jq`).
+- macOS with `git`, `curl`, `rsync`, `ssh`, `perl`, and `/usr/bin/python3` (Xcode Command Line Tools), plus `jq` (`brew install jq`). On Windows, use WSL; see [Windows (WSL)](#windows-wsl). Linux works the same way as WSL.
 - A Devin account on a plan that includes **Devin Cloud and the Devin API**. As of October 2026, [devin.ai/pricing](https://devin.ai/pricing) lists cloud sessions and API access from the Pro plan and not on Free, so `dvm` and `macrun` will not work on the Free plan.
 - The Devin CLI, logged in:
 
@@ -31,6 +31,46 @@ git clone https://github.com/floweredao/devin-vm.git && ./devin-vm/install.sh
 ```
 
 `install.sh` links `dvm` and `macrun` into `~/.local/bin` (choose another directory with `--prefix DIR`) and lists anything that is missing. It never overwrites an existing file that is not a symlink unless you pass `--force`.
+
+## Windows (WSL)
+
+On Windows, everything runs inside WSL 2 (Ubuntu). This is the most useful setup of all: a Windows PC cannot build or test iOS and Mac apps by itself, and `macrun` sends that work to the Mac VM with one command.
+
+Native Windows (PowerShell, Git Bash) is not supported. `dvm` keeps one SSH login open and reuses it for every command and `rsync` (OpenSSH ControlMaster), and Windows OpenSSH does not have that feature. Windows also has no `rsync`.
+
+1. In PowerShell as administrator, install WSL and Ubuntu, then restart if asked and open **Ubuntu** from the Start menu:
+
+   ```powershell
+   wsl --install -d Ubuntu
+   ```
+
+2. In the Ubuntu shell, install the tools, the Devin CLI (Linux build), and devin-vm:
+
+   ```sh
+   sudo apt update && sudo apt install -y jq curl rsync openssh-client git perl python3 util-linux
+   curl -fsSL https://cli.devin.ai/install.sh | bash
+   git clone https://github.com/floweredao/devin-vm.git ~/devin-vm && ~/devin-vm/install.sh
+   devin auth login
+   ```
+
+   If `install.sh` says `~/.local/bin is not on PATH`, open a new Ubuntu window: Ubuntu's `~/.profile` adds `~/.local/bin` once it exists.
+
+3. Use it as on a Mac, from the Ubuntu shell:
+
+   ```sh
+   dvm doctor
+   dvm up --mode swe-2-medium
+   macrun ~/code/MyApp 'xcodebuild test -scheme MyApp -destination "platform=iOS Simulator,name=iPhone 17"'
+   ```
+
+What is different on Windows:
+
+- **Where to keep projects.** Keep them in the WSL home (`~/code/MyApp`). A project on a Windows drive also works through `/mnt/c/...` (for `C:\Users\me\code\MyApp`, use `/mnt/c/Users/me/code/MyApp`), but reading it is much slower. In Windows Explorer, the WSL home is `\\wsl$\Ubuntu\home\<you>`.
+- **Clone inside WSL.** A clone made with Git for Windows can get Windows line endings or lose the executable bit. This repo pins LF endings in `.gitattributes`, but cloning in Ubuntu avoids both problems.
+- **From PowerShell or a Windows agent**, run through WSL: `wsl -e bash -lc "macrun ~/code/MyApp 'swift test'"`.
+- **Logs** go to `~/.local/state/mac-offload/logs/macrun/` instead of `~/Library/Logs/...`.
+- `macrun` cannot match the VM's Xcode to a local Swift version, because there is no local Xcode. It uses the VM's default Xcode unless you set `MACRUN_DEVELOPER_DIR`.
+- Everything else (the upload filter, keeping the VM awake, reconnecting) works the same. The Linux versions of the macOS-only parts are `flock` for `lockf`, GNU `tar` for `tar --no-mac-metadata`, and util-linux `script` for the login terminal.
 
 ## Quick start (about 5 minutes)
 
@@ -128,7 +168,7 @@ Your code still leaves your machine for Cognition's cloud. Do not use this for c
 
 - No physical devices, code signing with your certificates, or representative performance profiling.
 - Keep work on your own Mac when it needs your signed-in browser, local GUI automation, or files you have not approved for upload.
-- `macrun` uses macOS tools (`lockf`, `tar --no-mac-metadata`), so it runs on a Mac. `dvm` needs `bash`, `curl`, `jq`, `rsync`, and the Devin CLI.
+- `dvm` and `macrun` run on macOS and on Linux, including WSL on Windows. They do not run in native Windows shells.
 
 ## Configuration
 
@@ -145,16 +185,17 @@ Set these in your shell, or in `~/.config/mac-offload/devin.env` (or `$MAC_OFFLO
 | `DVM_RECONNECT_TRIES` | `3` | logins to try when the VM is waking |
 | `MACRUN_GIT` | `1` | `0` sends no git metadata |
 | `MACRUN_DEVELOPER_DIR` | `auto` | Xcode on the VM: `auto`, `none`, or a path |
-| `MACRUN_LOG_DIR` | `~/Library/Logs/mac-offload/macrun` | run logs |
+| `MACRUN_LOG_DIR` | `~/Library/Logs/mac-offload/macrun` (Linux/WSL: `~/.local/state/mac-offload/logs/macrun`) | run logs |
 
 ## Tests
 
 ```sh
 tests/macrun-test.sh          # offline, dvm is stubbed
 tests/mode-wake-test.sh       # offline, the API is stubbed
+tests/login-pty-test.sh       # offline, devin is stubbed
 tests/reconnect-retry-live.sh # live: needs a current session
 ```
 
 ## For AI agents
 
-[`SKILL.md`](SKILL.md) is an agent skill describing the same workflow. Link this folder into your agent's skills directory to use it.
+[`SKILL.md`](SKILL.md) is an agent skill describing the same workflow. Link this folder into your agent's skills directory to use it. For an agent running on Windows, link [`windows/`](windows/SKILL.md) instead: it runs every command through WSL.
