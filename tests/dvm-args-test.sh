@@ -6,7 +6,8 @@
 # shellcheck disable=SC2016,SC2088,SC2319 # literal stub scripts and remote ~ paths; check reads $? of the test before it
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-T="$(mktemp -d "${TMPDIR:-/tmp}/dvm-args.XXXXXX")"
+tmp="${TMPDIR:-/tmp}"
+T="$(mktemp -d "${tmp%/}/dvm-args.XXXXXX")" # macOS TMPDIR ends in /, and a // would not match pwd
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/state" "$T/bin" "$T/home"
 sid=stubsession0000000000000000000000
