@@ -193,6 +193,7 @@ Set these in your shell, or in `~/.config/mac-offload/devin.env` (or `$MAC_OFFLO
 tests/macrun-test.sh          # offline, dvm is stubbed
 tests/mode-wake-test.sh       # offline, the API is stubbed
 tests/login-pty-test.sh       # offline, devin is stubbed
+tests/ssh-reconnect-test.sh   # offline, ssh and devin are stubbed
 tests/reconnect-retry-live.sh # live: needs a current session
 ```
 
