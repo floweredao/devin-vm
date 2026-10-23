@@ -66,9 +66,11 @@ token() {
 }
 
 api() { # METHOD PATH [JSON_BODY]
-  local method="$1" path="$2" body="${3:-}" args
+  local method="$1" path="$2" body="${3:-}" auth args
+  # api usually runs inside $(...), where set -e is off: stop here rather than send no token.
+  auth="$(token)" || exit 1
   args=(-sS --fail-with-body -X "$method" "$API_BASE$path"
-        -H "Authorization: Bearer $(token)" -H "Accept: application/json")
+        -H "Authorization: Bearer $auth" -H "Accept: application/json")
   if [[ -n "$body" ]]; then
     args+=(-H "Content-Type: application/json" --data "$body")
   fi
@@ -116,7 +118,7 @@ set_current() {
 }
 
 cmd_up() {
-  local platform="macos" title="dvm remote mac" mode="" repos=() body response sid url
+  local platform="macos" title="dvm remote mac" mode="" repos=() body org response sid url
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --repo) repos+=("$2"); shift 2 ;;
@@ -131,7 +133,8 @@ cmd_up() {
             + (if $mode != "" then {devin_mode: $mode} else {} end)
             + (if ($ARGS.positional | length) > 0 then {repos: $ARGS.positional} else {} end)' \
     ${repos[@]+"${repos[@]}"})"
-  response="$(api POST "/v3/organizations/$(org_id)/sessions" "$body")"
+  org="$(org_id)"
+  response="$(api POST "/v3/organizations/$org/sessions" "$body")"
   sid="$(jq -r '.session_id' <<<"$response")"
   url="$(jq -r '.url' <<<"$response")"
   [[ -n "$sid" && "$sid" != null ]] || die "unexpected create response: $response"
@@ -147,8 +150,11 @@ cmd_use() {
   cat "$CURRENT_FILE"; echo
 }
 
-cmd_status() {
-  api GET "/v3/organizations/$(org_id)/sessions/$(session)" |
+cmd_status() { # also runs under `|| true` (doctor), where set -e is off
+  local org sid
+  org="$(org_id)" || return 1
+  sid="$(session)" || return 1
+  api GET "/v3/organizations/$org/sessions/$sid" |
     jq -r '"session  \(.session_id)\nmode     \(.devin_mode // "?")\nstatus   \(.status) \(.status_detail // "")\nusage    \(.acus_consumed)\nurl      \(.url)"'
 }
 
@@ -181,18 +187,20 @@ cmd_wait() {
 }
 
 cmd_sleep() {
-  local sid
+  local sid org
   sid="$(session)"
+  org="$(org_id)"
   close_master "$sid"
-  api POST "/v3/organizations/$(org_id)/sessions/$sid/archive" >/dev/null
+  api POST "/v3/organizations/$org/sessions/$sid/archive" >/dev/null
   echo "archived $sid"
 }
 
 cmd_down() {
-  local sid
+  local sid org
   sid="$(session)"
+  org="$(org_id)"
   close_master "$sid"
-  api DELETE "/v3/organizations/$(org_id)/sessions/$sid" >/dev/null
+  api DELETE "/v3/organizations/$org/sessions/$sid" >/dev/null
   rm -f "$CURRENT_FILE"
   echo "terminated $sid"
 }
@@ -282,6 +290,15 @@ remote_ssh() { # SID REMOTE_COMMAND...
   with_reconnect "$sid" $(ssh_base "$sid") "$(ssh_host "$sid")" "$@"
 }
 
+remote_path() { # PATH -> PATH quoted for the remote shell; a leading ~ or ~/ still expands there
+  # shellcheck disable=SC2088 # the ~ is meant for the remote shell
+  case "$1" in
+    '~') printf '~' ;;
+    '~/'*) printf '~/%q' "${1#'~/'}" ;;
+    *) printf '%q' "$1" ;;
+  esac
+}
+
 remote_cmd() { # DIR CMD... -> single zsh -lc string; one argument is taken as a shell script
   local dir="$1" joined
   shift
@@ -290,12 +307,13 @@ remote_cmd() { # DIR CMD... -> single zsh -lc string; one argument is taken as a
   else
     printf -v joined '%q ' "$@"
   fi
-  local script="cd $dir && $joined"
+  local script
+  script="cd $(remote_path "$dir") && $joined"
   printf 'zsh -lc %q' "$script"
 }
 
 cmd_run() {
-  local dir='~'
+  local dir='~' sid
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --cd) dir="$2"; shift 2 ;;
@@ -304,7 +322,8 @@ cmd_run() {
     esac
   done
   [[ $# -gt 0 ]] || die "run: missing command"
-  remote_ssh "$(session)" "$(remote_cmd "$dir" "$@")"
+  sid="$(session)"
+  remote_ssh "$sid" "$(remote_cmd "$dir" "$@")"
 }
 
 cmd_push() {
@@ -319,7 +338,7 @@ cmd_push() {
   remote_dir="${remote_dir:-work/$(basename "$local_dir")}"
   local sid pattern
   sid="$(session)"
-  remote_ssh "$sid" "mkdir -p $remote_dir"
+  remote_ssh "$sid" "mkdir -p $(remote_path "$remote_dir")"
   local args=(-az --delete -e "$(ssh_base "$sid")")
   for pattern in "${excludes[@]}"; do args+=(--exclude "$pattern"); done
   with_reconnect "$sid" rsync "${args[@]}" "$local_dir/" "$(ssh_host "$sid"):$remote_dir/"
@@ -337,10 +356,16 @@ cmd_pull() {
 
 cmd_forward() {
   [[ $# -ge 1 ]] || die "forward: missing PORT"
-  exec devin forward "$(session)" "$@"
+  local sid
+  sid="$(session)"
+  exec devin forward "$sid" "$@"
 }
 
-cmd_shell() { exec devin ssh "$(session)"; }
+cmd_shell() {
+  local sid
+  sid="$(session)"
+  exec devin ssh "$sid"
+}
 
 cmd_doctor() {
   echo "devin    $(devin --version 2>&1 | head -1)"
