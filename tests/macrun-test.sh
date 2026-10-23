@@ -17,7 +17,7 @@ cat > "$STUB" <<'STUB_EOF'
 #!/bin/bash
 printf '%s\n' "$*" >> "$DVM_CALLS"
 case "$1" in
-  status) printf 'status   running\nusage    1.5\nurl      secret-url\n' ;;
+  status) printf 'status   running\nusage    1.5\nurl      secret-url\n'; exit "${STUB_STATUS_RC:-0}" ;;
   current) echo stubsession0000000000 ;;
   wake)
     if [ "${STUB_WAKE_MODE:-swe-2-medium}" = normal ]; then echo 'dvm: wake: stub is a normal session; not sending' >&2
@@ -178,6 +178,30 @@ for _ in $(seq 30); do pgrep -f "sleep $DVM_WAKE_TICK" >/dev/null || break; slee
 ! pgrep -f "sleep $DVM_WAKE_TICK" >/dev/null
 case_result "the timer ends by itself when macrun is killed" $?
 unset DVM_WAKE_TICK
+
+out="$("$MACRUN" --status 2>&1)"; status_rc=$?
+[ "$status_rc" -eq 0 ] && grep -q '^status   running$' <<<"$out" && grep -q '^active-until [0-9]*$' <<<"$out"
+case_result "--status shows the session and the active window" $?
+out="$(STUB_STATUS_RC=1 "$MACRUN" --status 2>&1)"; status_rc=$?
+[ "$status_rc" -eq 1 ] && grep -q '^active-until [0-9]*$' <<<"$out"
+case_result "--status returns dvm status's failure and still shows the window" $?
+
+UNTIL="$ROOT/state/devin-active-until"
+printf '5\n' > "$UNTIL"
+"$MACRUN" --awake 2h >/dev/null 2>&1; awake_rc=$?
+now="$(date +%s)"
+[ "$awake_rc" -eq 0 ] && [ "$(cat "$UNTIL")" -ge $((now + 7195)) ] && [ "$(cat "$UNTIL")" -le $((now + 7205)) ]
+case_result "--awake 2h keeps the VM awake for two hours" $?
+"$MACRUN" --awake 0 >/dev/null 2>&1; awake_rc=$?
+[ "$awake_rc" -eq 0 ] && [ "$(cat "$UNTIL")" = 0 ]
+case_result "--awake 0 clears the window" $?
+bad_ok=0
+for bad in '' 5 h m fooh 1xm -5m 1.5h; do
+  printf '99\n' > "$UNTIL"
+  "$MACRUN" --awake "$bad" >/dev/null 2>&1; awake_rc=$?
+  { [ "$awake_rc" -eq 2 ] && [ "$(cat "$UNTIL")" = 99 ]; } || { echo "  --awake '$bad' returned $awake_rc, window $(cat "$UNTIL")"; bad_ok=1; }
+done
+case_result "--awake rejects a malformed duration with exit 2 and keeps the window" "$bad_ok"
 
 bash -n "$MACRUN" "$0"
 case_result "bash syntax checks pass" $?
