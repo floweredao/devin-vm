@@ -5,11 +5,14 @@
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 T="$(mktemp -d "${TMPDIR:-/tmp}/dvm-pty.XXXXXX")"
-trap 'rm -rf "$T"' EXIT
-mkdir -p "$T/state" "$T/bin" "$T/home/.ssh"
+# ssh binds the master to "<ControlPath>.<16 characters>", which has to fit a Unix socket address
+# (104 bytes on macOS), so the state dir lives under a short root: a macOS TMPDIR is too long.
+S="$(mktemp -d /tmp/dvm-pty-state.XXXXXX)"
+trap 'rm -rf "$T" "$S"' EXIT
+mkdir -p "$T/bin" "$T/home/.ssh"
 sid=stubsession0000000000000000000000
-printf '%s' "$sid" > "$T/state/current"
-printf 'org-stub' > "$T/state/org_id"
+printf '%s' "$sid" > "$S/current"
+printf 'org-stub' > "$S/org_id"
 cat > "$T/bin/devin" <<'EOF'
 #!/bin/bash
 { if (: </dev/tty) 2>/dev/null; then echo "tty=yes"; else echo "tty=no"; fi
@@ -22,7 +25,7 @@ printf '#!/bin/bash\necho "{}"\n' > "$T/bin/curl"
 # ~/.ssh from the passwd home, not $HOME, so a fake known_hosts would not be seen.)
 printf '#!/bin/bash\nexit 0\n' > "$T/bin/ssh-keygen"
 chmod +x "$T/bin/devin" "$T/bin/curl" "$T/bin/ssh-keygen"
-export HOME="$T/home" DVM_STATE_DIR="$T/state" PATH="$T/bin:$PATH" STUB_LOG="$T/calls" DEVIN_API_KEY=stub
+export HOME="$T/home" DVM_STATE_DIR="$S" PATH="$T/bin:$PATH" STUB_LOG="$T/calls" DEVIN_API_KEY=stub
 pass=0 fail=0
 check() { if [ "$2" -eq 0 ]; then echo "PASS $1"; pass=$((pass + 1)); else echo "FAIL $1"; fail=$((fail + 1)); fi; }
 
@@ -35,7 +38,7 @@ grep -qx 'tty=yes' "$STUB_LOG"
 check "devin ssh gets a terminal for its login" $?
 grep -qx "args=ssh $sid true" "$STUB_LOG"
 check "the login is 'devin ssh <session> true'" $?
-grep -qx "ssh=$ROOT/libexec/ssh" "$STUB_LOG" && grep -qx "control=$T/state/cm-${sid:0:16}" "$STUB_LOG"
+grep -qx "ssh=$ROOT/libexec/ssh" "$STUB_LOG" && grep -qx "control=$S/cm-${sid:0:16}" "$STUB_LOG"
 check "the login uses libexec/ssh and the session's control path" $?
 
 echo "RESULT: $pass passed, $fail failed"

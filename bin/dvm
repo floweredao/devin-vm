@@ -238,7 +238,10 @@ with_timeout() { # SECONDS CMD... (macOS has no timeout(1); perl works on both)
 # authenticate: libexec/ssh (put first on PATH) makes that login an OpenSSH ControlMaster,
 # and every command and transfer then runs over plain, PTY-free ssh that reuses it.
 ssh_host() { printf 'devin-%s@%s' "$1" "${DVM_SSH_GATEWAY:-ssh.devin.ai}"; }
-control_path() { printf '%s/cm-%s' "$STATE_DIR" "${1:0:16}"; }
+control_path() { # ssh expands %-tokens in ControlPath, so a literal % is written %%
+  local path="$STATE_DIR/cm-${1:0:16}"
+  printf '%s' "${path//%/%%}"
+}
 ssh_base() { # SID -> ssh command line (without host) that only reuses the master
   printf '/usr/bin/ssh -o ControlPath=%s -o ControlMaster=no -o BatchMode=yes -T' "$(control_path "$1")"
 }
@@ -248,7 +251,13 @@ master_alive() {
 }
 
 open_master() { # SID -> 0 once an authenticated master connection exists
-  local sid="$1" login
+  local sid="$1" login log socket="$STATE_DIR/cm-${1:0:16}" limit=104
+  # ssh binds a new master to "<ControlPath>.<16 random characters>" first, and that must fit in
+  # a Unix socket address (104 bytes on macOS, 108 on Linux); otherwise the login succeeds
+  # without a master and every later command fails.
+  [[ "$(uname -s)" == Darwin ]] || limit=108
+  (( ${#socket} + 17 < limit )) ||
+    die "control socket path $socket is too long for ssh (${#socket} bytes, at most $((limit - 18))); set DVM_STATE_DIR to a shorter directory"
   master_alive "$sid" && return 0
   ensure_host_key
   mkdir -p "$STATE_DIR"
@@ -261,9 +270,18 @@ open_master() { # SID -> 0 once an authenticated master connection exists
   elif command -v script >/dev/null 2>&1; then
     login=(script -qec "$(printf '%q ' "${login[@]}")" /dev/null)
   fi
-  PATH="$ROOT/libexec:$PATH" DVM_CONTROL_PATH="$(control_path "$sid")" \
-    with_timeout 180 "${login[@]}" </dev/null >/dev/null 2>&1 || return 1
-  master_alive "$sid"
+  log="$STATE_DIR/login-${sid:0:16}.log"
+  if ! PATH="$ROOT/libexec:$PATH" DVM_CONTROL_PATH="$(control_path "$sid")" \
+      with_timeout 180 "${login[@]}" </dev/null >"$log" 2>&1 || ! master_alive "$sid"; then
+    # A changed gateway key fails every login, so say so instead of logging in again.
+    if grep -q 'Host key verification failed' "$log"; then
+      rm -f "$log"
+      die "ssh rejected the host key of ${DVM_SSH_GATEWAY:-ssh.devin.ai} (Host key verification failed); if the gateway's key really changed, remove the old one with 'ssh-keygen -R ${DVM_SSH_GATEWAY:-ssh.devin.ai}' and try again"
+    fi
+    rm -f "$log"
+    return 1
+  fi
+  rm -f "$log"
 }
 
 close_master() {
@@ -276,10 +294,20 @@ close_master() {
 # on it (ssh exits 255). In either case close the master, log in again (this also wakes the
 # session) and retry once. A command that merely fails is not retried.
 with_reconnect() { # SID CMD...
-  local sid="$1" rc=0
+  local sid="$1" rc=0 sig=""
   shift
   open_master "$sid" || die "cannot open an SSH connection to $sid (try 'dvm wait' or 'dvm status')"
+  # Ctrl-C also makes ssh exit 255; stop then instead of reconnecting and running CMD again.
+  trap 'sig=INT' INT
   "$@" || rc=$?
+  trap - INT
+  [[ -z "$sig" ]] || kill -s INT $$
+  # CMD can exit 255 itself (perl's die does). If a new session over the master still opens,
+  # the connection is fine and CMD is not run again.
+  if (( rc == 255 )) && master_alive "$sid" &&
+      $(ssh_base "$sid") "$(ssh_host "$sid")" true </dev/null >/dev/null 2>&1; then
+    return "$rc"
+  fi
   if (( rc == 255 )) || { (( rc != 0 )) && ! master_alive "$sid"; }; then
     echo "dvm: connection to $sid failed (the session probably went to sleep); reconnecting and retrying once" >&2
     close_master "$sid"
