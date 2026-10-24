@@ -110,7 +110,7 @@ macrun ~/code/MyApp 'xcodebuild test -scheme MyAppUITests -destination "platform
 dvm pull work/macrun/MyApp-1a2b3c4d/build/UI.xcresult ./dvm-artifacts/
 ```
 
-조금 고친 뒤 다시 올리지 않고 실행하기(VM에 마지막 사본이 남아 있어요):
+다시 올리지 않고 실행하기(VM에 마지막 사본이 남아 있어요. 그 뒤에 로컬에서 고친 것은 VM에 없어요):
 
 ```sh
 macrun --no-sync ~/code/MyApp 'swift test --filter LoginTests'
@@ -133,8 +133,9 @@ macrun --no-sync ~/code/MyApp 'swift test --filter LoginTests'
 `macrun`은 폴더를 그대로 올리지 않고 걸러 낸 사본을 올려요.
 
 - git이 추적하거나 무시하지 않는 파일만 올려요(git 저장소가 아니면 모든 파일).
-- 절대 안 올리는 것: `.git`, `node_modules`, `build`, `.build`, `DerivedData`, `target`, `data`, `.env`와 `.env.*`(`.env.example`, `.env.sample`, `.env.template`은 올려요), `Local.xcconfig`, `*.p12`, `*.p8`, `*.key`, `*.pem`, `*.mobileprovision`, 키체인, 이름에 `credentials`가 들어간 파일, 추적되지 않는 `.omo`/`.senpi` 에이전트 폴더.
-- 빌드 스크립트에서 `git rev-parse`와 `git status`가 되도록, 사본에는 지금 `HEAD` 커밋 하나짜리 `.git`을 넣어요. 추적 중인 파일이 비밀값으로 빠졌으면 git 정보는 아예 보내지 않아요. 끄려면 `MACRUN_GIT=0`.
+- 절대 안 올리는 것: `.git`, `node_modules`, `build`, `.build`, `DerivedData`, `target`, `data`, `.DS_Store`, `.env`와 `.env.*`(`.env.example`, `.env.sample`, `.env.template`은 올려요), `Local.xcconfig`, `*.p12`, `*.p8`, `*.key`, `*.pem`, `*.mobileprovision`, 키체인, 이름에 `credentials`가 들어간 파일, 추적되지 않는 `.omo`/`.senpi` 에이전트 폴더.
+- 업로드할 때 `.swiftpm`과 `.state` 폴더도 모두 빼요.
+- 폴더가 git 저장소의 맨 위 폴더이면, 빌드 스크립트에서 `git rev-parse`와 `git status`가 되도록 사본에 지금 `HEAD` 커밋 하나짜리 `.git`을 넣어요. 저장소 안의 하위 폴더에는 넣지 않아요. 추적 중이거나 커밋된 파일이 위 목록 때문에 빠졌으면(비밀값뿐 아니라 `data`나 `build` 안의 파일 등) git 정보는 아예 보내지 않아요. 끄려면 `MACRUN_GIT=0`.
 
 그래도 코드는 내 맥을 떠나 Cognition 클라우드로 가요. 올리면 안 되는 코드에는 쓰지 마세요.
 
@@ -160,7 +161,7 @@ macrun --no-sync ~/code/MyApp 'swift test --filter LoginTests'
 | `SSH did not answer` / 시작에서 멈춤 | VM이 깨어나는 중이에요. `dvm wait` 후 다시 해요. 상태는 `dvm status`. |
 | `connection ... failed (the session probably went to sleep); reconnecting` | 정상이에요. 명령 중에 VM이 잠들어서 `dvm`이 다시 돌렸어요. 긴 명령은 SWE-2 세션에서 돌려야 `macrun`이 깨워 둘 수 있어요. |
 | `wake: ... is a normal session; not sending` | SWE-2 세션이 아니에요. `dvm up --mode swe-2-medium`으로 새로 만드세요. 새 세션은 비어 있어서 다음 `macrun`이 전부 다시 올려요. |
-| `macrun: no git metadata sent; N tracked file(s) are excluded` | 추적 중인 파일이 비밀값처럼 보여요(`.env`, `*.p12` 등). 실행은 되고 `.git`만 빠져요. |
+| `macrun: no git metadata sent; N tracked file(s) are excluded` | 추적 중인 파일이 안 올리는 목록에 걸렸어요(`.env`, `*.p12`, `data`나 `build` 안의 파일 등). 실행은 되고 `.git`만 빠져요. |
 | Docker가 필요한 명령이 아주 느림 | VM에 중첩 가상화가 없어서 Docker가 에뮬레이션으로 돌아요. |
 | `not a directory` | 프로젝트 폴더를 먼저, 명령은 따옴표로 묶은 한 덩어리로 넘겨요. |
 
@@ -179,7 +180,7 @@ macrun --no-sync ~/code/MyApp 'swift test --filter LoginTests'
 | `DEVIN_API_KEY` | CLI 로그인 | API 토큰(`cog_...`) |
 | `DEVIN_ORG_ID` | `/v3/self`에서 | Devin 조직 id |
 | `DVM_SESSION` | `.state/current` | 현재 세션 대신 쓸 세션 |
-| `DVM_STATE_DIR` | `<저장소>/.state` | `dvm`이 현재 세션과 SSH 소켓을 두는 곳 |
+| `DVM_STATE_DIR` | `<저장소>/.state` | `dvm`이 현재 세션, 저장해 둔 조직 id, SSH 소켓을 두는 곳 |
 | `DVM` | `macrun` 옆의 `bin/dvm` | `macrun`이 쓸 `dvm` |
 | `DVM_WAKE_AFTER` / `DVM_WAKE_EVERY` | `240` / `240` | 첫 깨우기까지, 깨우기 사이의 초. `0`이면 꺼요 |
 | `DVM_RECONNECT_TRIES` | `3` | VM이 깨어날 때 로그인을 몇 번 시도할지 |
