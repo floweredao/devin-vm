@@ -167,6 +167,11 @@ DVM_WAKE_AFTER=0 STUB_RUN_SLEEP=3 "$MACRUN" --no-sync "$REPO" 'echo off' > /dev/
 case_result "DVM_WAKE_AFTER=0 turns the timer off" $?
 
 fresh_wake
+DVM_WAKE_AFTER=1 DVM_WAKE_EVERY=0 STUB_RUN_SLEEP=3 "$MACRUN" --no-sync "$REPO" 'echo off' > /dev/null 2>&1
+[ "$(wake_calls)" -eq 0 ]
+case_result "DVM_WAKE_EVERY=0 turns the timer off" $?
+
+fresh_wake
 DVM_WAKE_AFTER=30 STUB_RUN_SLEEP=20 "$MACRUN" --no-sync "$REPO" 'echo killed' > /dev/null 2>&1 &
 locker=$!
 for _ in $(seq 50); do pgrep -f "sleep $DVM_WAKE_TICK" >/dev/null && pgrep -f "$STUB run --cd" >/dev/null && break; sleep 0.1; done

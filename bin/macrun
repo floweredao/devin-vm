@@ -19,7 +19,7 @@ else
 fi
 # The Devin VM sleeps about 5 minutes after its agent last replied, even mid-run; a "." message
 # (dvm wake, swe-2-* only) starts those 5 minutes again. A run longer than DVM_WAKE_AFTER seconds
-# sends one, then one every DVM_WAKE_EVERY seconds. 0 turns this off.
+# sends one, then one every DVM_WAKE_EVERY seconds. 0 in either turns this off.
 DVM_WAKE_AFTER="${DVM_WAKE_AFTER:-240}"
 DVM_WAKE_EVERY="${DVM_WAKE_EVERY:-240}"
 DVM_WAKE_TICK="${DVM_WAKE_TICK:-5}"
@@ -86,7 +86,7 @@ wake_tick() {
 # Background loop for the length of one run; ends when stopped or when this macrun is gone.
 start_wake_timer() {
   wake_timer=""
-  [ "$DVM_WAKE_AFTER" -gt 0 ] 2>/dev/null || return 0
+  [ "$DVM_WAKE_AFTER" -gt 0 ] 2>/dev/null && [ "$DVM_WAKE_EVERY" -gt 0 ] 2>/dev/null || return 0
   (
     nap=""
     trap '[ -n "$nap" ] && kill "$nap" 2>/dev/null; exit 0' TERM
