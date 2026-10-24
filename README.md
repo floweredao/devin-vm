@@ -195,6 +195,7 @@ tests/mode-wake-test.sh       # offline, the API is stubbed
 tests/login-pty-test.sh       # offline, devin is stubbed
 tests/dvm-args-test.sh        # offline, dvm arguments and errors; curl and devin are stubbed
 tests/install-test.sh         # offline, installs into a scratch --prefix
+tests/ssh-reconnect-test.sh   # offline, ssh and devin are stubbed
 tests/reconnect-retry-live.sh # live: needs a current session
 ```
 
