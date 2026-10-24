@@ -1,0 +1,64 @@
+#!/bin/bash
+# Offline security checks of dvm and macrun. curl, devin, ssh-keygen and ssh-keyscan are stubs on
+# PATH and macrun gets a stub dvm, so nothing leaves this machine; keys and tokens are synthetic.
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+T="$(mktemp -d "${TMPDIR:-/tmp}/dvm-sec.XXXXXX")"
+trap 'rm -rf "$T"' EXIT
+mkdir -p "$T/state" "$T/bin" "$T/home"
+sid=stubsession0000000000000000000000
+token=cog_synthetic_token_0000
+# The stub curl writes its argv (what ps shows) to $STUB_LOG and any header it reads from stdin
+# (-H @-) to $STUB_LOG.stdin.
+cat > "$T/bin/curl" <<'EOF'
+#!/bin/bash
+printf 'curl %s\n' "$*" >> "$STUB_LOG"
+for arg in "$@"; do [ "$arg" = @- ] && cat >> "$STUB_LOG.stdin"; done
+printf '{"session_id":"stubsession","devin_mode":"normal"}\n'
+EOF
+cat > "$T/bin/devin" <<'EOF'
+#!/bin/bash
+printf 'devin %s\n' "$*" >> "$STUB_LOG"
+exit 1
+EOF
+# ssh-keyscan answers with a different synthetic key on each call, as a gateway that is being
+# impersonated for only some connections would; ssh-keygen -F says the host is unknown and
+# -l prints "FP-<key>" for each key in the file.
+cat > "$T/bin/ssh-keyscan" <<'EOF'
+#!/bin/bash
+n="$(cat "$STUB_LOG.scans" 2>/dev/null || echo 0)"; echo $((n + 1)) > "$STUB_LOG.scans"
+printf '%s ssh-ed25519 AAAAsyntheticKey%s\n' "${@: -1}" "$n"
+EOF
+cat > "$T/bin/ssh-keygen" <<'EOF'
+#!/bin/bash
+case "$1" in
+  -F) exit 1 ;;
+  -lf) awk '{print "256 FP-" $3 " " $1 " (ED25519)"}' "$2" ;;
+esac
+EOF
+chmod +x "$T/bin/"*
+export HOME="$T/home" DVM_STATE_DIR="$T/state" PATH="$T/bin:$PATH" STUB_LOG="$T/calls" DEVIN_API_KEY="$token"
+unset DVM_SESSION DEVIN_ORG_ID DVM_SSH_GATEWAY
+pass=0 fail=0
+check() { if [ "$2" -eq 0 ]; then echo "PASS $1"; pass=$((pass + 1)); else echo "FAIL $1"; fail=$((fail + 1)); fi; }
+reset() { rm -f "$T/calls"* "$T/home/.ssh/known_hosts"; printf '%s' "$sid" > "$T/state/current"; printf 'org-stub' > "$T/state/org_id"; }
+
+# ---------- the API token stays out of argv ----------
+
+reset
+"$ROOT/bin/dvm" status >/dev/null 2>&1
+grep -q '^curl .*/v3/organizations/org-stub/sessions/' "$STUB_LOG" && ! grep -q "$token" "$STUB_LOG"
+check "the API token is not in curl's argv (visible in ps)" $?
+[ "$(cat "$STUB_LOG.stdin" 2>/dev/null)" = "Authorization: Bearer $token" ] && grep -q 'Accept: application/json' "$STUB_LOG"
+check "curl still gets the Authorization header, on stdin" $?
+
+reset
+printf '[auth]\napi_key = "cog_synthetic_cli_0000"\n' > "$T/credentials.toml"
+env -u DEVIN_API_KEY DEVIN_CREDENTIALS_FILE="$T/credentials.toml" "$ROOT/bin/dvm" status >/dev/null 2>&1
+! grep -q cog_synthetic_cli_0000 "$STUB_LOG" && grep -q 'Bearer cog_synthetic_cli_0000$' "$STUB_LOG.stdin"
+check "the CLI login token is not in curl's argv either" $?
+
+bash -n "$ROOT/bin/dvm" "$ROOT/bin/macrun" "$0"
+check "bash syntax checks pass" $?
+echo "RESULT: $pass passed, $fail failed"
+[ "$fail" -eq 0 ]

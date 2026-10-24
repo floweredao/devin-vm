@@ -72,7 +72,10 @@ api() { # METHOD PATH [JSON_BODY]
   if [[ -n "$body" ]]; then
     args+=(-H "Content-Type: application/json" --data "$body")
   fi
-  curl "${args[@]}" || die "API $method $path failed"
+  # Every local user can read curl's argv (ps), so curl reads the Authorization header from stdin.
+  local header
+  for header in "${args[@]}"; do [[ "$header" == Authorization:* ]] && break; done
+  printf '%s\n' "$header" | curl "${args[@]/#Authorization:*/@-}" || die "API $method $path failed"
 }
 
 org_id() {
