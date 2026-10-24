@@ -34,7 +34,7 @@ The steps below are the lower-level `dvm` workflow.
    as current, and waits for SSH. Reuse the current session across tasks instead of creating
    new ones. `dvm up --mode swe-2-medium` creates it in SWE-2 mode, which `dvm wake` needs.
 3. `dvm push [LOCAL_DIR] [REMOTE_DIR]` - rsync the project (default remote `~/work/<name>`;
-   excludes node_modules, .build, DerivedData, build, .DS_Store). Push again after local edits.
+   excludes node_modules, .build, DerivedData, build, .DS_Store, .state). Push again after local edits.
 4. `dvm run --cd work/<name> -- <command...>` - runs in a login zsh; the exit code is the
    command's. Keep each run self-contained: build, test, and write artifacts in one call.
 5. `dvm pull <remote-path> [local-dest]` - bring back logs, screenshots, xcresult bundles.

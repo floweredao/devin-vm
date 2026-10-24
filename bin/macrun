@@ -49,6 +49,7 @@ set_window() {
 duration_seconds() {
   case "$1" in
     0) echo 0 ;;
+    h|m|*[!0-9]*h|*[!0-9]*m) return 1 ;;
     *h) echo $(( ${1%h} * 3600 )) ;;
     *m) echo $(( ${1%m} * 60 )) ;;
     *) return 1 ;;
@@ -113,10 +114,10 @@ stop_wake_timer() {
 case "${1:-}" in
   --help|-h) usage; exit 0 ;;
   --status)
-    "$DVM" status
+    "$DVM" status; status_rc=$?
     printf 'active-until '
     if [ -f "$STATE_DIR/devin-active-until" ]; then cat "$STATE_DIR/devin-active-until"; else echo 0; fi
-    exit 0 ;;
+    exit "$status_rc" ;;
   --awake)
     seconds="$(duration_seconds "${2:-}")" || { usage >&2; exit 2; }
     mkdir -p "$STATE_DIR"
