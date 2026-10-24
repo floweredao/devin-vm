@@ -58,6 +58,30 @@ env -u DEVIN_API_KEY DEVIN_CREDENTIALS_FILE="$T/credentials.toml" "$ROOT/bin/dvm
 ! grep -q cog_synthetic_cli_0000 "$STUB_LOG" && grep -q 'Bearer cog_synthetic_cli_0000$' "$STUB_LOG.stdin"
 check "the CLI login token is not in curl's argv either" $?
 
+# ---------- session ids ----------
+
+reset
+out="$("$ROOT/bin/dvm" use 'abc -Jevil.example' 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] && grep -q 'not a session id' <<<"$out" && [ "$(cat "$T/state/current")" = "$sid" ]
+check "use rejects an id that would split into extra ssh options and keeps the current one" $?
+
+reset
+out="$(DVM_SESSION='abc -oProxyJump=x' "$ROOT/bin/dvm" wake 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] && grep -q 'not a session id' <<<"$out" && [ ! -e "$STUB_LOG" ]
+check "a DVM_SESSION with a space stops wake before any API call" $?
+
+# run passes "$(session)" straight to remote_ssh, where die in the substitution does not stop
+# dvm, so only check that the id never reaches devin ssh.
+reset
+out="$(DVM_SESSION='abc -oProxyJump=x' "$ROOT/bin/dvm" run -- true 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] && grep -q 'not a session id' <<<"$out" && ! grep -q ProxyJump "$STUB_LOG" 2>/dev/null
+check "a DVM_SESSION with a space never reaches devin ssh" $?
+
+reset
+"$ROOT/bin/dvm" use https://app.devin.ai/sessions/devin-0123abcdef_x-9/ >/dev/null 2>&1
+[ "$(cat "$T/state/current")" = 0123abcdef_x-9 ]
+check "use still takes a session URL" $?
+
 bash -n "$ROOT/bin/dvm" "$ROOT/bin/macrun" "$0"
 check "bash syntax checks pass" $?
 echo "RESULT: $pass passed, $fail failed"
