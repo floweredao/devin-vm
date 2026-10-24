@@ -90,6 +90,37 @@ stored="$(awk '{print $3}' "$T/home/.ssh/known_hosts" 2>/dev/null)"
 [ "$(grep -c . "$T/home/.ssh/known_hosts" 2>/dev/null)" = 1 ] && grep -q "added ssh.devin.ai host key: FP-$stored$" <<<"$out"
 check "the fingerprint shown is the one of the key written to known_hosts ($stored)" $?
 
+# ---------- macrun secret filter on case-insensitive file systems ----------
+
+cat > "$T/bin/stub-dvm" <<'EOF'
+#!/bin/bash
+EOF
+chmod +x "$T/bin/stub-dvm"
+P="$T/proj"
+mkdir -p "$P/sub"
+git -C "$P" init -q
+printf 'code\n' > "$P/a.swift"
+printf 'KEY=\n' > "$P/.Env.Example"
+for f in .ENV sub/.Env.Local LOCAL.XCCONFIG Server.PEM dist.P12 AuthKey.P8 app.KEY Dev.MobileProvision login.Keychain-db; do
+  printf 'secret\n' > "$P/$f"
+done
+git -C "$P" add a.swift .Env.Example
+git -C "$P" -c user.name=test -c user.email=test@example.invalid commit -qm init
+run_stage() { DVM="$T/bin/stub-dvm" MACRUN_STATE_DIR="$T/mstate" MACRUN_CACHE_DIR="$T/cache" MACRUN_LOG_DIR="$T/log" \
+  MAC_OFFLOAD_LIB="$T/no-lib" MACRUN_STAGE_ONLY=1 "$ROOT/bin/macrun" "$1" true 2>&1; }
+out="$(run_stage "$P")"
+stage="$(sed -n 's/^staged [0-9]* files at //p' <<<"$out")"
+actual="$(cd "$stage" 2>/dev/null && find . -path ./.git -prune -o -type f -print | LC_ALL=C sort)"
+[ -n "$stage" ] && [ "$actual" = "$(printf './.Env.Example\n./a.swift')" ]
+check "upper-case variants of .env, .env.*, Local.xcconfig, keys and keychains are not staged" $?
+
+git -C "$P" add -f .ENV
+git -C "$P" -c user.name=test -c user.email=test@example.invalid commit -qm env
+out="$(run_stage "$P")"
+stage="$(sed -n 's/^staged [0-9]* files at //p' <<<"$out")"
+[ -n "$stage" ] && [ ! -e "$stage/.ENV" ] && [ ! -e "$stage/.git" ] && grep -q 'no git metadata sent; 1 tracked file' <<<"$out"
+check "a tracked .ENV keeps git metadata (which would carry it) out of the copy" $?
+
 bash -n "$ROOT/bin/dvm" "$ROOT/bin/macrun" "$0"
 check "bash syntax checks pass" $?
 echo "RESULT: $pass passed, $fail failed"
