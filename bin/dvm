@@ -211,10 +211,13 @@ cmd_down() {
 ensure_host_key() {
   local host="${DVM_SSH_GATEWAY:-ssh.devin.ai}"
   ssh-keygen -F "$host" >/dev/null 2>&1 && return
+  local key
   mkdir -p "$HOME/.ssh"
-  ssh-keyscan -t ed25519 "$host" 2>/dev/null >> "$HOME/.ssh/known_hosts" ||
-    die "could not fetch the host key of $host"
-  echo "dvm: added $host host key: $(ssh-keygen -lf <(ssh-keyscan -t ed25519 "$host" 2>/dev/null) | awk '{print $2}')" >&2
+  # Scan once: a second scan could return a different key than the one written.
+  key="$(ssh-keyscan -t ed25519 "$host" 2>/dev/null)" || key=""
+  [[ -n "$key" ]] || die "could not fetch the host key of $host"
+  printf '%s\n' "$key" >> "$HOME/.ssh/known_hosts"
+  echo "dvm: added $host host key: $(ssh-keygen -lf <(printf '%s\n' "$key") | awk '{print $2}')" >&2
 }
 
 with_timeout() { # SECONDS CMD... (macOS has no timeout(1); perl works on both)

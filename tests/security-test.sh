@@ -82,6 +82,14 @@ reset
 [ "$(cat "$T/state/current")" = 0123abcdef_x-9 ]
 check "use still takes a session URL" $?
 
+# ---------- gateway host key ----------
+
+reset
+out="$("$ROOT/bin/dvm" run -- true 2>&1)"
+stored="$(awk '{print $3}' "$T/home/.ssh/known_hosts" 2>/dev/null)"
+[ "$(grep -c . "$T/home/.ssh/known_hosts" 2>/dev/null)" = 1 ] && grep -q "added ssh.devin.ai host key: FP-$stored$" <<<"$out"
+check "the fingerprint shown is the one of the key written to known_hosts ($stored)" $?
+
 bash -n "$ROOT/bin/dvm" "$ROOT/bin/macrun" "$0"
 check "bash syntax checks pass" $?
 echo "RESULT: $pass passed, $fail failed"
