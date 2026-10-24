@@ -14,6 +14,8 @@ sid=stubsession0000000000000000000000
 cat > "$T/bin/curl" <<'EOF'
 #!/bin/bash
 printf 'curl %s\n' "$*" >> "$STUB_LOG"
+# dvm passes the Authorization header on stdin (-H @-), out of ps; record it apart.
+for arg in "$@"; do [ "$arg" = @- ] && cat >> "$STUB_LOG.stdin"; done
 printf '{}\n'
 EOF
 for tool in devin rsync ssh-keyscan; do
@@ -27,7 +29,7 @@ unset DVM_SESSION DEVIN_ORG_ID
 pass=0 fail=0
 check() { if [ "$2" -eq 0 ]; then echo "PASS $1"; pass=$((pass + 1)); else echo "FAIL $1"; fail=$((fail + 1)); fi; }
 reset() { # [with-session] [with-org]
-  rm -f "$T/state/current" "$T/state/org_id"; : > "$STUB_LOG"
+  rm -f "$T/state/current" "$T/state/org_id" "$STUB_LOG.stdin"; : > "$STUB_LOG"
   [ "${1:-}" = with-session ] && printf '%s' "$sid" > "$T/state/current"
   [ "${2:-}" = with-org ] && printf 'org-stub' > "$T/state/org_id"
   return 0
@@ -96,7 +98,7 @@ check "no credential stops before an unauthenticated API call" $?
 reset with-session with-org
 printf '[auth]\napi_key = "cog_synthetic_test_value"\n' > "$T/credentials.toml"
 env -u DEVIN_API_KEY DEVIN_CREDENTIALS_FILE="$T/credentials.toml" "$ROOT/bin/dvm" status >/dev/null 2>&1
-grep -q 'Authorization: Bearer cog_synthetic_test_value ' "$STUB_LOG"
+grep -qx 'Authorization: Bearer cog_synthetic_test_value' "$STUB_LOG.stdin"
 check "the CLI login token is read from credentials.toml" $?
 
 # The stub answers /v3/self with {}, so the org id cannot be resolved.
