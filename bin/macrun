@@ -154,47 +154,57 @@ mkdir -p "$staging" "$CACHE_DIR"
 list="$STATE_DIR/macrun-files-$$"
 trap 'rm -f "$list"' EXIT
 tracked="$STATE_DIR/macrun-tracked-$$"
-: > "$tracked"
+committed="$STATE_DIR/macrun-committed-$$"
+: > "$tracked"; : > "$committed"
 if git -C "$absolute_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   git -C "$absolute_dir" ls-files -z -co --exclude-standard > "$list"
   git -C "$absolute_dir" ls-files -z > "$tracked"
+  # HEAD can hold a file the index no longer has (git rm --cached); the copy's .git would carry it.
+  git -C "$absolute_dir" ls-tree -r -z --name-only HEAD > "$committed" 2>/dev/null
 else
   (cd "$absolute_dir" && find . -type f -print0) > "$list"
 fi
 filtered="$STATE_DIR/macrun-filtered-$$"
 dropped="$STATE_DIR/macrun-dropped-$$"
-trap 'rm -f "$list" "$filtered" "$tracked" "$dropped"' EXIT
+trap 'rm -f "$list" "$filtered" "$tracked" "$committed" "$dropped"' EXIT
 python=/usr/bin/python3
 [ "$OS" = Darwin ] || python="$(command -v python3)" || { echo "macrun: python3 is required" >&2; exit 1; }
-MACRUN_LIST="$list" MACRUN_FILTERED="$filtered" MACRUN_TRACKED="$tracked" MACRUN_DROPPED="$dropped" MACRUN_ROOT="$absolute_dir" "$python" -c '
+MACRUN_LIST="$list" MACRUN_FILTERED="$filtered" MACRUN_TRACKED="$tracked" MACRUN_COMMITTED="$committed" MACRUN_DROPPED="$dropped" MACRUN_ROOT="$absolute_dir" "$python" -c '
 import os, re
 src, dst = os.environ["MACRUN_LIST"], os.environ["MACRUN_FILTERED"]
 root = os.environ["MACRUN_ROOT"]
 drop_dirs = {".git", "node_modules", "target", ".build", "DerivedData", "build", "data"}
 agent_dirs = {".omo", ".senpi"}
 with open(os.environ["MACRUN_TRACKED"], "rb") as f: tracked = set(f.read().split(b"\0"))
+with open(os.environ["MACRUN_COMMITTED"], "rb") as f: committed = f.read().split(b"\0")
 drop_names = {".env", "Local.xcconfig", ".DS_Store"}
 suffixes = (".p12", ".p8", ".key", ".pem", ".mobileprovision")
 env_templates = {".env.example", ".env.sample", ".env.template"}
 credential_name = re.compile(r"(^|[._-])credentials?([._-]|$)")
+def excluded(parts):
+  name = parts[-1]
+  return any(part in drop_dirs for part in parts) or name in drop_names or (name.startswith(".env.") and name not in env_templates) or name.endswith(suffixes) or ".keychain" in name or credential_name.search(name.lower())
 with open(src, "rb") as f: entries = f.read().split(b"\0")
 with open(dst, "wb") as out, open(os.environ["MACRUN_DROPPED"], "wb") as dropped:
   count = 0
+  reported = set()
   for raw in entries:
     if not raw: continue
     path = raw.decode("utf-8", "surrogateescape")
     if path.startswith("./"): path = path[2:]
     parts = path.split("/")
-    name = parts[-1]
     if any(part in agent_dirs for part in parts) and raw not in tracked:
       continue
-    if any(part in drop_dirs for part in parts) or name in drop_names or (name.startswith(".env.") and name not in env_templates) or name.endswith(suffixes) or ".keychain" in name or credential_name.search(name.lower()):
-      if raw in tracked: dropped.write(raw + b"\0")
+    if excluded(parts):
+      if raw in tracked: dropped.write(raw + b"\0"); reported.add(raw)
       continue
     full = os.path.join(root, path)
     if not (os.path.islink(full) or os.path.isfile(full)):
       continue
     out.write(raw + b"\0"); count += 1
+  for raw in committed:
+    if raw and raw not in reported and excluded(raw.decode("utf-8", "surrogateescape").split("/")):
+      dropped.write(raw + b"\0"); reported.add(raw)
 print(count)
 ' > "$STATE_DIR/macrun-count-$$"
 count="$(cat "$STATE_DIR/macrun-count-$$")"
@@ -234,7 +244,7 @@ command_string="$toolchain_prefix$command_string"
 mkdir -p "$LOG_DIR"
 timestamp="$(date +%Y%m%d-%H%M%S)"
 log="$LOG_DIR/$timestamp-$name.log"
-trap 'rm -f "$list" "$filtered" "$tracked" "$dropped"; stop_wake_timer' EXIT
+trap 'rm -f "$list" "$filtered" "$tracked" "$committed" "$dropped"; stop_wake_timer' EXIT
 start_wake_timer
 "$DVM" run --cd "work/macrun/$name" -- "$command_string" 2>&1 | tee "$log"
 rc="${PIPESTATUS[0]}"

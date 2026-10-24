@@ -96,6 +96,20 @@ MACRUN_GIT=0 MACRUN_STAGE_ONLY=1 "$MACRUN" "$CLEAN" true > /dev/null 2>&1
 [ ! -e "$clean_stage/.git" ]
 case_result "MACRUN_GIT=0 sends no git metadata" $?
 
+UNTRACKED="$ROOT/untracked-secret"
+mkdir -p "$UNTRACKED"
+git -C "$UNTRACKED" init -q
+printf 'secret\n' > "$UNTRACKED/.env"
+printf 'x\n' > "$UNTRACKED/a.swift"
+git -C "$UNTRACKED" add .env a.swift
+git -C "$UNTRACKED" -c user.name=test -c user.email=test@example.invalid commit -qm init
+git -C "$UNTRACKED" rm -q --cached .env
+printf '.env\n' > "$UNTRACKED/.gitignore"
+MACRUN_STAGE_ONLY=1 "$MACRUN" "$UNTRACKED" true > "$ROOT/untracked.out" 2>&1
+untracked_stage="$(sed -n 's/^staged [0-9]* files at //p' "$ROOT/untracked.out")"
+[ -n "$untracked_stage" ] && [ ! -e "$untracked_stage/.env" ] && [ ! -e "$untracked_stage/.git" ] && grep -q 'no git metadata sent; 1 tracked file' "$ROOT/untracked.out"
+case_result "a secret still in HEAD but no longer in the index keeps git metadata out" $?
+
 : > "$CALLS"
 STUB_RUN_RC=3 "$MACRUN" "$REPO" 'echo run' > "$ROOT/run.out" 2>&1
 run_rc=$?
