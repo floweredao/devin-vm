@@ -192,6 +192,11 @@ with open(dst, "wb") as out, open(os.environ["MACRUN_DROPPED"], "wb") as dropped
     if any(part in drop_dirs for part in parts) or name in drop_names or (name.startswith(".env.") and name not in env_templates) or name.endswith(suffixes) or ".keychain" in name or credential_name.search(name.lower()):
       if raw in tracked: dropped.write(raw + b"\0")
       continue
+    # macOS file systems ignore case (.ENV is read as .env), so the secret names match in any case.
+    low = parts[-1].lower()
+    if low in {n.lower() for n in drop_names} or (low.startswith(".env.") and low not in env_templates) or low.endswith(suffixes) or ".keychain" in low:
+      if raw in tracked: dropped.write(raw + b"\0")
+      continue
     full = os.path.join(root, path)
     if not (os.path.islink(full) or os.path.isfile(full)):
       continue

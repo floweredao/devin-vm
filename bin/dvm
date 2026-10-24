@@ -74,7 +74,10 @@ api() { # METHOD PATH [JSON_BODY]
   if [[ -n "$body" ]]; then
     args+=(-H "Content-Type: application/json" --data "$body")
   fi
-  curl "${args[@]}" || die "API $method $path failed"
+  # Every local user can read curl's argv (ps), so curl reads the Authorization header from stdin.
+  local header
+  for header in "${args[@]}"; do [[ "$header" == Authorization:* ]] && break; done
+  printf '%s\n' "$header" | curl "${args[@]/#Authorization:*/@-}" || die "API $method $path failed"
 }
 
 org_id() {
@@ -99,7 +102,10 @@ org_id() {
 normalize_id() { # accepts an id or an app.devin.ai session URL
   local raw="${1%/}"
   raw="${raw##*/}"
-  printf '%s' "${raw#devin-}"
+  raw="${raw#devin-}"
+  # The id goes into ssh options and file names unquoted; a space would add ssh arguments.
+  [[ "$raw" =~ ^[A-Za-z0-9_-]+$ ]] || die "not a session id: $1"
+  printf '%s' "$raw"
 }
 
 session() {
@@ -146,7 +152,9 @@ cmd_up() {
 
 cmd_use() {
   [[ $# -eq 1 ]] || die "use: expected one session id or URL"
-  set_current "$(normalize_id "$1")"
+  local sid
+  sid="$(normalize_id "$1")"
+  set_current "$sid"
   cat "$CURRENT_FILE"; echo
 }
 
@@ -211,10 +219,13 @@ cmd_down() {
 ensure_host_key() {
   local host="${DVM_SSH_GATEWAY:-ssh.devin.ai}"
   ssh-keygen -F "$host" >/dev/null 2>&1 && return
+  local key
   mkdir -p "$HOME/.ssh"
-  ssh-keyscan -t ed25519 "$host" 2>/dev/null >> "$HOME/.ssh/known_hosts" ||
-    die "could not fetch the host key of $host"
-  echo "dvm: added $host host key: $(ssh-keygen -lf <(ssh-keyscan -t ed25519 "$host" 2>/dev/null) | awk '{print $2}')" >&2
+  # Scan once: a second scan could return a different key than the one written.
+  key="$(ssh-keyscan -t ed25519 "$host" 2>/dev/null)" || key=""
+  [[ -n "$key" ]] || die "could not fetch the host key of $host"
+  printf '%s\n' "$key" >> "$HOME/.ssh/known_hosts"
+  echo "dvm: added $host host key: $(ssh-keygen -lf <(printf '%s\n' "$key") | awk '{print $2}')" >&2
 }
 
 with_timeout() { # SECONDS CMD... (macOS has no timeout(1); perl works on both)
