@@ -9,7 +9,13 @@ description: On a Windows PC, offload Mac-only work (Xcode/Swift builds, iOS Sim
 Homebrew, Node/Python/Rust) as a remote build and QA machine. On Windows they run only inside
 WSL 2 (Ubuntu): they need bash, rsync, and OpenSSH connection sharing (ControlMaster), which
 PowerShell, cmd, and Git Bash do not have. The full workflow, recipes, and limits are in
-[`../SKILL.md`](../SKILL.md); this file covers what is different on Windows.
+`SKILL.md` at the root of the devin-vm clone in WSL, outside this folder; print it with:
+
+```powershell
+wsl -e bash -lc "type -P dvm | xargs readlink -f | xargs dirname | xargs -I{} cat {}/../SKILL.md"
+```
+
+This file covers what is different on Windows.
 
 ## Running commands
 
@@ -38,9 +44,10 @@ PowerShell, cmd, and Git Bash do not have. The full workflow, recipes, and limit
 ## Setup check
 
 1. `wsl -e bash -lc "command -v dvm macrun devin"` prints three paths. If not, the user has to
-   finish the setup in README.md, section Windows (WSL): `wsl --install -d Ubuntu`, the apt
-   packages, `curl -fsSL https://cli.devin.ai/install.sh | bash`, a clone of devin-vm in the
-   WSL home, and `./install.sh`.
+   finish the setup in the README section
+   [Windows (WSL)](https://github.com/floweredao/devin-vm#windows-wsl): `wsl --install -d Ubuntu`,
+   the apt packages, `curl -fsSL https://cli.devin.ai/install.sh | bash`, a clone of devin-vm in
+   the WSL home, and `./install.sh`.
 2. `wsl -e bash -lc "dvm doctor"` shows CLI, auth, API access, and the current session.
    `devin auth login` is interactive and only the user can run it.
 
