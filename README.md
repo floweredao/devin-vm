@@ -110,7 +110,7 @@ Get results back (logs, screenshots, `.xcresult`). `macrun` puts each project at
 dvm pull work/macrun/MyApp-1a2b3c4d/build/UI.xcresult ./dvm-artifacts/
 ```
 
-Run again after a small change without re-uploading (the VM keeps the last copy):
+Run again without re-uploading (the VM keeps the last copy, so local edits since the last upload are not on it):
 
 ```sh
 macrun --no-sync ~/code/MyApp 'swift test --filter LoginTests'
@@ -133,8 +133,9 @@ Other useful commands:
 `macrun` uploads a cleaned copy, not your folder as-is:
 
 - Only files that git tracks or does not ignore (or every file if the folder is not a git repo).
-- Never: `.git`, `node_modules`, `build`, `.build`, `DerivedData`, `target`, `data`, `.env` and `.env.*` (except `.env.example`, `.env.sample`, `.env.template`), `Local.xcconfig`, `*.p12`, `*.p8`, `*.key`, `*.pem`, `*.mobileprovision`, keychains, files named like `credentials`, and untracked `.omo`/`.senpi` agent folders.
-- The copy gets a one-commit `.git` at your current `HEAD` so `git rev-parse` and `git status` work in build scripts. If a tracked file was excluded as a secret, no git data is sent at all. Turn this off with `MACRUN_GIT=0`.
+- Never: `.git`, `node_modules`, `build`, `.build`, `DerivedData`, `target`, `data`, `.DS_Store`, `.env` and `.env.*` (except `.env.example`, `.env.sample`, `.env.template`), `Local.xcconfig`, `*.p12`, `*.p8`, `*.key`, `*.pem`, `*.mobileprovision`, keychains, files named like `credentials`, and untracked `.omo`/`.senpi` agent folders.
+- The upload also leaves out every `.swiftpm` and `.state` folder.
+- When the folder is the top of a git repo, the copy gets a one-commit `.git` at your current `HEAD` so `git rev-parse` and `git status` work in build scripts; a subfolder of a repo gets none. If a tracked or committed file is left out by the list above (a secret, but also, for example, a file under `data` or `build`), no git data is sent at all. Turn this off with `MACRUN_GIT=0`.
 
 Your code still leaves your machine for Cognition's cloud. Do not use this for code you are not allowed to upload.
 
@@ -160,7 +161,7 @@ Your code still leaves your machine for Cognition's cloud. Do not use this for c
 | `SSH did not answer` / commands hang at the start | The VM is waking up; `dvm wait` and try again. `dvm status` shows the session state. |
 | `connection ... failed (the session probably went to sleep); reconnecting` | Normal: the VM slept mid-command and `dvm` reran it. For long commands, use a SWE-2 session so `macrun` can keep it awake. |
 | `wake: ... is a normal session; not sending` | The session is not SWE-2. Create a new one with `dvm up --mode swe-2-medium`; it starts empty, so the next `macrun` uploads everything again. |
-| `macrun: no git metadata sent; N tracked file(s) are excluded` | A tracked file looks like a secret (`.env`, `*.p12`, ...). The run still works; only `.git` is left out. |
+| `macrun: no git metadata sent; N tracked file(s) are excluded` | A tracked file is on the never-upload list (`.env`, `*.p12`, a file under `data` or `build`, ...). The run still works; only `.git` is left out. |
 | A command that needs Docker is very slow | The VM has no nested virtualization; Docker runs under emulation. |
 | `not a directory` | Pass the project folder first, then the command as one quoted string. |
 
@@ -179,7 +180,7 @@ Set these in your shell, or in `~/.config/mac-offload/devin.env` (or `$MAC_OFFLO
 | `DEVIN_API_KEY` | CLI login | API token (`cog_...`) |
 | `DEVIN_ORG_ID` | from `/v3/self` | Devin organization id |
 | `DVM_SESSION` | `.state/current` | session to use instead of the current one |
-| `DVM_STATE_DIR` | `<repo>/.state` | where `dvm` keeps the current session and SSH socket |
+| `DVM_STATE_DIR` | `<repo>/.state` | where `dvm` keeps the current session, the cached org id, and the SSH socket |
 | `DVM` | `bin/dvm` next to `macrun` | `dvm` binary for `macrun` |
 | `DVM_WAKE_AFTER` / `DVM_WAKE_EVERY` | `240` / `240` | seconds before the first wake and between wakes; `0` turns it off |
 | `DVM_RECONNECT_TRIES` | `3` | logins to try when the VM is waking |
