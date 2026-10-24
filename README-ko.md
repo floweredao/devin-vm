@@ -193,6 +193,8 @@ macrun --no-sync ~/code/MyApp 'swift test --filter LoginTests'
 tests/macrun-test.sh          # 오프라인, dvm은 가짜
 tests/mode-wake-test.sh       # 오프라인, API는 가짜
 tests/login-pty-test.sh       # 오프라인, devin은 가짜
+tests/dvm-args-test.sh        # 오프라인, dvm 인자와 오류 처리; curl과 devin은 가짜
+tests/install-test.sh         # 오프라인, 임시 --prefix에 설치
 tests/reconnect-retry-live.sh # 실제 세션 필요
 ```
 
