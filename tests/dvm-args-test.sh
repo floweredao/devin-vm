@@ -120,6 +120,18 @@ bare status
 [ "$rc" -eq 1 ] && grep -q "'devin' is required but not installed" <<<"$out"
 check "status still names the missing devin CLI" $?
 
+# doctor lists the tools that are missing besides devin, jq and curl.
+reset
+mkdir -p "$T/docbin"
+for c in bash dirname readlink cat sed head mkdir grep tr cut awk uname jq; do ln -sf "$(command -v "$c")" "$T/docbin/$c"; done
+printf '#!/bin/bash\necho "devin 1.0"\n' > "$T/docbin/devin"; cp "$T/bin/curl" "$T/docbin/curl"; chmod +x "$T/docbin/devin"
+out="$(PATH="$T/docbin" "$T/docbin/bash" "$ROOT/bin/dvm" doctor 2>&1)"
+grep -q '^tools    MISSING .*rsync' <<<"$out" && grep -q 'perl' <<<"$out"
+check "doctor names missing tools such as rsync and perl" $?
+out="$("$ROOT/bin/dvm" doctor 2>&1)"
+grep -qx 'tools    ok' <<<"$out"
+check "doctor says tools ok when everything is installed" $?
+
 # ---------- failures that must stop dvm before it calls out ----------
 
 for args in "status" "run -- true" "forward 3000" "shell"; do

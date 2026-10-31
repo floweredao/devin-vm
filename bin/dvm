@@ -427,6 +427,17 @@ cmd_shell() {
 }
 
 cmd_doctor() {
+  # The other tools dvm and macrun call; ssh is run by absolute path.
+  local tools=(rsync /usr/bin/ssh ssh-keygen ssh-keyscan perl) missing=() t hint
+  if [[ "$(uname -s)" == Darwin ]]; then
+    tools+=(/usr/bin/python3 /usr/bin/script)
+    hint="xcode-select --install (perl, python3), brew install rsync"
+  else
+    tools+=(python3 script flock)
+    hint="sudo apt install rsync openssh-client perl python3 util-linux"
+  fi
+  for t in "${tools[@]}"; do command -v "$t" >/dev/null 2>&1 || missing+=("${t##*/}"); done
+  if (( ${#missing[@]} )); then echo "tools    MISSING ${missing[*]} ($hint)"; else echo "tools    ok"; fi
   echo "devin    $(devin --version 2>&1 | head -1)"
   devin auth status 2>&1 | sed 's/^/auth     /' | head -2
   if self="$(api GET /v3/self 2>/dev/null)"; then
