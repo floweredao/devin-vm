@@ -141,6 +141,31 @@ done
 [ "$(cat "$T/state/current" 2>/dev/null)" = "$sid" ]
 check "down without an org id keeps the current session" $?
 
+# A rejected API call: curl --fail-with-body prints the server's explanation on stdout and exits
+# non-zero. dvm must report that explanation, and must not pass the error body on as session data.
+mkdir -p "$T/failbin"
+cat > "$T/failbin/curl" <<'EOF'
+#!/bin/bash
+cat >/dev/null 2>&1
+printf '{"error":"forbidden","detail":"Your plan does not include Devin API access"}\n'
+exit 22
+EOF
+chmod +x "$T/failbin/curl"
+failing() { out="$(PATH="$T/failbin:$PATH" "$ROOT/bin/dvm" "$@" 2>&1)"; rc=$?; }
+
+reset with-session with-org
+failing status
+[ "$rc" -ne 0 ] && grep -q 'does not include Devin API access' <<<"$out" && ! grep -q null <<<"$out"
+check "a rejected API call says what the server said and prints no session fields" $?
+
+for args in "up --mode swe-2-medium" "wake" "sleep" "down"; do
+  reset with-session with-org
+  # shellcheck disable=SC2086 # word splitting of $args is intended
+  failing $args
+  [ "$rc" -ne 0 ] && grep -q 'does not include Devin API access' <<<"$out"
+  check "'$args' says what the server said when the API rejects the call" $?
+done
+
 # ---------- remote command quoting ----------
 
 lib="$T/lib/bin/dvm"
