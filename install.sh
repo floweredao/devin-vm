@@ -8,7 +8,7 @@ PREFIX="$HOME/.local/bin"
 FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --prefix) PREFIX="$2"; shift 2 ;;
+    --prefix) [ $# -ge 2 ] || { echo "install.sh: --prefix needs a value" >&2; exit 2; }; PREFIX="$2"; shift 2 ;;
     --force) FORCE=1; shift ;;
     -h|--help) sed -n '2,3s/^# //p' "$0"; exit 0 ;;
     *) echo "install.sh: unknown argument '$1'" >&2; exit 2 ;;
