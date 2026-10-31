@@ -248,5 +248,16 @@ remote "$(cat "$T/rec.1")" >/dev/null
 [ -d "$HOME/work/Another Project" ] && [ ! -e "$HOME/work/Another" ] && [ ! -e "$HOME/Project" ]
 check "push creates one remote directory for a name with a space" $?
 
+# The messages name the path the VM used: relative to ~, a ~/ path, or an absolute path.
+msg() { bash -c 'source "$1"; shift; with_reconnect() { :; }; remote_ssh() { :; }; session() { echo s; }; "$@"' _ "$lib" "$@" 2>&1; }
+for pair in "work/x|~/work/x" "~/work/x|~/work/x" "/tmp/abs|/tmp/abs"; do
+  out="$(msg cmd_push "$T/src" "${pair%%|*}")"
+  grep -q -- "-> ${pair#*|}\$" <<<"$out"
+  check "push reports '${pair%%|*}' as ${pair#*|}" $?
+  out="$(msg cmd_pull "${pair%%|*}" "$T/pulled/")"
+  grep -q "^pulled ${pair#*|} -> " <<<"$out"
+  check "pull reports '${pair%%|*}' as ${pair#*|}" $?
+done
+
 echo "RESULT: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
