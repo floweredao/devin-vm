@@ -84,6 +84,17 @@ dvm pull
 [ "$rc" -eq 1 ] && grep -q 'pull: missing REMOTE_PATH' <<<"$out" && [ ! -s "$STUB_LOG" ]
 check "pull without a path fails" $?
 
+dvm push "$T/nope/missing"
+[ "$rc" -eq 1 ] && grep -qx "dvm: push: not a directory: $T/nope/missing" <<<"$out" && [ ! -s "$STUB_LOG" ]
+check "push names a directory that does not exist" $?
+
+for bad in abc 1m -5 10.5; do
+  reset with-session with-org
+  dvm wait "$bad"
+  [ "$rc" -eq 1 ] && grep -q "dvm: wait: " <<<"$out" && [ ! -s "$STUB_LOG" ]
+  check "wait rejects '$bad' before trying to log in" $?
+done
+
 dvm forward
 [ "$rc" -eq 1 ] && grep -q 'forward: missing PORT' <<<"$out" && [ ! -s "$STUB_LOG" ]
 check "forward without a port fails" $?
