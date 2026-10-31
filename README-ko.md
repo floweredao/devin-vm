@@ -133,7 +133,7 @@ macrun --no-sync ~/code/MyApp 'swift test --filter LoginTests'
 `macrun`은 폴더를 그대로 올리지 않고 걸러 낸 사본을 올려요.
 
 - git이 추적하거나 무시하지 않는 파일만 올려요(git 저장소가 아니면 모든 파일).
-- 절대 안 올리는 것: `.git`, `node_modules`, `build`, `.build`, `DerivedData`, `target`, `data`, `.DS_Store`, `.env`와 `.env.*`(`.env.example`, `.env.sample`, `.env.template`은 올려요), `Local.xcconfig`, `*.p12`, `*.p8`, `*.key`, `*.pem`, `*.mobileprovision`, 키체인, 이름에 `credentials`가 들어간 파일, 추적되지 않는 `.omo`/`.senpi` 에이전트 폴더.
+- 절대 안 올리는 것: `.git`, `node_modules`, `build`, `.build`, `DerivedData`, `target`, `data`, `.DS_Store`, `.env`와 `.env.*`(`.env.example`, `.env.sample`, `.env.template`은 올려요), `Local.xcconfig`, `*.p12`, `*.p8`, `*.key`, `*.pem`, `*.mobileprovision`, 키체인, 이름에 `credentials`가 들어간 파일, 에이전트 상태 폴더 `.omo`와 `.senpi`(OMO, Senpi) 안의 추적되지 않는 파일(목록은 `MACRUN_SKIP_UNTRACKED`로 바꿔요).
 - 업로드할 때 `.swiftpm`과 `.state` 폴더도 모두 빼요.
 - 폴더가 git 저장소의 맨 위 폴더이면, 빌드 스크립트에서 `git rev-parse`와 `git status`가 되도록 사본에 지금 `HEAD` 커밋 하나짜리 `.git`을 넣어요. 저장소 안의 하위 폴더에는 넣지 않아요. 추적 중이거나 커밋된 파일이 위 목록 때문에 빠졌으면(비밀값뿐 아니라 `data`나 `build` 안의 파일 등) git 정보는 아예 보내지 않아요. 끄려면 `MACRUN_GIT=0`.
 
@@ -211,9 +211,10 @@ mkdir -p ~/.config/mac-offload && cp devin-vm/devin.env.example ~/.config/mac-of
 | `MACRUN_WAKE_LOG` | `$MACRUN_LOG_DIR/wake.log` | 깨울 때마다 한 줄 |
 | `MACRUN_STATE_DIR` | `~/.local/state/mac-offload` | 잠금 파일, 깨우기 기록, `devin-active-until` |
 | `MACRUN_CACHE_DIR` | `~/.cache/mac-offload/macrun` | 올리기 전에 정리한 프로젝트 사본 |
+| `MACRUN_SKIP_UNTRACKED` | `.omo .senpi` | 추적되지 않는 파일을 올리지 않을 폴더 이름(공백으로 구분). 추적 중인 파일은 올려요. 비우면 모두 올려요 |
 | `MACRUN_STAGE_ONLY` | `0` | `1`이면 사본만 만들고 위치를 알려 준 뒤 멈춰요(무엇이 올라갈지 확인용) |
 | `DVM_ACTIVE_WINDOW` | `10800` | 실행마다 VM을 사용 중으로 표시하는 초(아래 참고) |
-| `MAC_OFFLOAD_LIB` | `<저장소>/share/mac-offload/lib` | 선택 훅 `dvm-vendor.sh`가 있는 폴더. 있으면 올리기 전에 읽어서 `dvm_vendor_sync`를 불러요 |
+| `MAC_OFFLOAD_LIB` | 없음 | 선택 훅 `dvm-vendor.sh`가 있는 폴더. 정해져 있고 파일이 있으면 올리기 전에 읽어서 `dvm_vendor_sync`를 불러요 |
 
 `macrun`은 VM을 언제까지 사용 중으로 볼지를 `$MACRUN_STATE_DIR/devin-active-until`(epoch 초)에 적어요. 실행이 끝날 때마다 지금 + `DVM_ACTIVE_WINDOW`예요. 이 저장소에서는 아무것도 이 값을 읽지 않아요. 직접 만든 깨우기·재우기 작업에서 쓰라고 있어요. `macrun --awake 2h`(또는 `30m`)로 늘리고, `macrun --awake 0`으로 지우고, `macrun --status`로 봐요.
 

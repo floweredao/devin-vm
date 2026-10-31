@@ -174,12 +174,12 @@ dropped="$STATE_DIR/macrun-dropped-$$"
 trap 'rm -f "$list" "$filtered" "$tracked" "$committed" "$dropped"' EXIT
 python=/usr/bin/python3
 [ "$OS" = Darwin ] || python="$(command -v python3)" || { echo "macrun: python3 is required" >&2; exit 1; }
-MACRUN_LIST="$list" MACRUN_FILTERED="$filtered" MACRUN_TRACKED="$tracked" MACRUN_COMMITTED="$committed" MACRUN_DROPPED="$dropped" MACRUN_ROOT="$absolute_dir" "$python" -c '
+MACRUN_SKIP_UNTRACKED="${MACRUN_SKIP_UNTRACKED-.omo .senpi}" MACRUN_LIST="$list" MACRUN_FILTERED="$filtered" MACRUN_TRACKED="$tracked" MACRUN_COMMITTED="$committed" MACRUN_DROPPED="$dropped" MACRUN_ROOT="$absolute_dir" "$python" -c '
 import os, re
 src, dst = os.environ["MACRUN_LIST"], os.environ["MACRUN_FILTERED"]
 root = os.environ["MACRUN_ROOT"]
 drop_dirs = {".git", "node_modules", "target", ".build", "DerivedData", "build", "data"}
-agent_dirs = {".omo", ".senpi"}
+skip_untracked = set(os.environ["MACRUN_SKIP_UNTRACKED"].split())
 with open(os.environ["MACRUN_TRACKED"], "rb") as f: tracked = set(f.read().split(b"\0"))
 with open(os.environ["MACRUN_COMMITTED"], "rb") as f: committed = f.read().split(b"\0")
 drop_names = {".env", "Local.xcconfig", ".DS_Store"}
@@ -198,7 +198,7 @@ with open(dst, "wb") as out, open(os.environ["MACRUN_DROPPED"], "wb") as dropped
     path = raw.decode("utf-8", "surrogateescape")
     if path.startswith("./"): path = path[2:]
     parts = path.split("/")
-    if any(part in agent_dirs for part in parts) and raw not in tracked:
+    if any(part in skip_untracked for part in parts) and raw not in tracked:
       continue
     if excluded(parts):
       if raw in tracked: dropped.write(raw + b"\0"); reported.add(raw)
@@ -236,11 +236,13 @@ if [ -s "$tracked" ] && [ "${MACRUN_GIT:-1}" = 1 ]; then
   fi
 fi
 if [ "${MACRUN_STAGE_ONLY:-0}" = 1 ]; then echo "staged $count files at $staging"; exit 0; fi
-# Optional hook: a launchd keep-alive job that cannot read ~/Documents can ship a dvm-vendor.sh
-# that copies dvm and its session state elsewhere. Without it, nothing happens here.
-vendor_lib="${MAC_OFFLOAD_LIB:-$SCRIPT_DIR/../share/mac-offload/lib}/dvm-vendor.sh"
-# shellcheck source=/dev/null # optional user hook, not in this repo
-if [ -f "$vendor_lib" ]; then . "$vendor_lib"; dvm_vendor_sync; fi
+# Optional hook: when MAC_OFFLOAD_LIB names a folder with a dvm-vendor.sh, macrun sources it and
+# calls dvm_vendor_sync before uploading (for example, to copy dvm where a background job can
+# read it). Unset, nothing happens here.
+if [ -n "${MAC_OFFLOAD_LIB:-}" ] && [ -f "$MAC_OFFLOAD_LIB/dvm-vendor.sh" ]; then
+  # shellcheck source=/dev/null # optional user hook, not in this repo
+  . "$MAC_OFFLOAD_LIB/dvm-vendor.sh"; dvm_vendor_sync
+fi
 if [ "$no_sync" -eq 0 ]; then "$DVM" push "$staging" "work/macrun/$name" --exclude target/ --exclude .swiftpm/ || exit $?; fi
 toolchain_prefix=""
 if [ "${MACRUN_DEVELOPER_DIR:-auto}" = auto ]; then

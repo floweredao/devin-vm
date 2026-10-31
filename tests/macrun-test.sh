@@ -61,6 +61,16 @@ expected="$(printf './.gitignore\n./.omo/x\n./Package.swift\n./new.swift\n./src/
 [ ! -e "$stage_path/vendor" ] && [ ! -e "$stage_path/login.keychain-db" ]; case_result "nested untracked repo and keychain-db are not staged" $?
 [ "$actual" = "$expected" ]; case_result "stage keeps tracked .omo, drops untracked .omo, secrets, build, ignored" $?
 case_result "stage count reports five" "$(grep -q '^staged 5 files at ' "$ROOT/stage.out"; echo $?)"
+MACRUN_SKIP_UNTRACKED='' MACRUN_STAGE_ONLY=1 "$MACRUN" "$REPO" true > "$ROOT/skip-none.out" 2>&1
+none_path="$(sed -n 's/^staged [0-9]* files at //p' "$ROOT/skip-none.out")"
+[ -f "$none_path/.omo/untracked-state" ] && grep -q '^staged 6 files at ' "$ROOT/skip-none.out"
+case_result "MACRUN_SKIP_UNTRACKED= (empty) uploads untracked .omo files too" $?
+mkdir -p "$REPO/.cache-x" && printf 'x\n' > "$REPO/.cache-x/y"
+MACRUN_SKIP_UNTRACKED='.cache-x' MACRUN_STAGE_ONLY=1 "$MACRUN" "$REPO" true > "$ROOT/skip-own.out" 2>&1
+own_path="$(sed -n 's/^staged [0-9]* files at //p' "$ROOT/skip-own.out")"
+[ ! -e "$own_path/.cache-x" ] && [ -f "$own_path/.omo/untracked-state" ]
+case_result "MACRUN_SKIP_UNTRACKED replaces the default list" $?
+rm -rf "$REPO/.cache-x"
 [ ! -e "$stage_path/.git" ] && grep -q 'no git metadata sent; 4 tracked file' "$ROOT/stage.out"
 case_result "tracked secrets keep git metadata out of the copy" $?
 
@@ -132,6 +142,18 @@ DVM="$ROOT/bin/nopush-dvm" "$MACRUN" "$REPO" 'echo run' > "$ROOT/nopush.out" 2>&
 nopush_rc=$?
 [ "$nopush_rc" -eq 1 ] && grep -q '^push ' "$CALLS" && ! grep -q '^run --cd' "$CALLS"
 case_result "a failed push stops before the run and returns its code" $?
+
+# The dvm-vendor.sh hook runs only when MAC_OFFLOAD_LIB names its folder, not from a default path.
+INST="$ROOT/inst"
+mkdir -p "$INST/bin" "$INST/share/mac-offload/lib" "$ROOT/hook-lib"
+cp "$MACRUN" "$INST/bin/macrun"
+hook='dvm_vendor_sync() { : > "$HOOK_MARK"; }'
+printf '%s\n' "$hook" > "$INST/share/mac-offload/lib/dvm-vendor.sh"
+printf '%s\n' "$hook" > "$ROOT/hook-lib/dvm-vendor.sh"
+env -u MAC_OFFLOAD_LIB HOOK_MARK="$ROOT/hook-default" "$INST/bin/macrun" "$REPO" 'echo run' > /dev/null 2>&1
+[ ! -e "$ROOT/hook-default" ]; case_result "without MAC_OFFLOAD_LIB no hook is sourced from a default path" $?
+MAC_OFFLOAD_LIB="$ROOT/hook-lib" HOOK_MARK="$ROOT/hook-set" "$MACRUN" "$REPO" 'echo run' > /dev/null 2>&1
+[ -e "$ROOT/hook-set" ]; case_result "MAC_OFFLOAD_LIB set sources its dvm-vendor.sh and calls dvm_vendor_sync" $?
 until_value="$(cat "$ROOT/state/devin-active-until")"
 now="$(date +%s)"
 [ "$until_value" -ge $((now + 10795)) ] && [ "$until_value" -le $((now + 10805)) ]
