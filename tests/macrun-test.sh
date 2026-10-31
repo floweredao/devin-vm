@@ -61,7 +61,7 @@ expected="$(printf './.gitignore\n./.omo/x\n./Package.swift\n./new.swift\n./src/
 [ ! -e "$stage_path/vendor" ] && [ ! -e "$stage_path/login.keychain-db" ]; case_result "nested untracked repo and keychain-db are not staged" $?
 [ "$actual" = "$expected" ]; case_result "stage keeps tracked .omo, drops untracked .omo, secrets, build, ignored" $?
 case_result "stage count reports five" "$(grep -q '^staged 5 files at ' "$ROOT/stage.out"; echo $?)"
-MACRUN_SKIP_UNTRACKED= MACRUN_STAGE_ONLY=1 "$MACRUN" "$REPO" true > "$ROOT/skip-none.out" 2>&1
+MACRUN_SKIP_UNTRACKED='' MACRUN_STAGE_ONLY=1 "$MACRUN" "$REPO" true > "$ROOT/skip-none.out" 2>&1
 none_path="$(sed -n 's/^staged [0-9]* files at //p' "$ROOT/skip-none.out")"
 [ -f "$none_path/.omo/untracked-state" ] && grep -q '^staged 6 files at ' "$ROOT/skip-none.out"
 case_result "MACRUN_SKIP_UNTRACKED= (empty) uploads untracked .omo files too" $?
