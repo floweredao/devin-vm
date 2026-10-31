@@ -217,7 +217,8 @@ cmd_down() {
   org="$(org_id)"
   close_master "$sid"
   api DELETE "/v3/organizations/$org/sessions/$sid" >/dev/null
-  rm -f "$CURRENT_FILE"
+  # With DVM_SESSION set, sid can be another session; keep the stored current one then.
+  [[ "$(cat "$CURRENT_FILE" 2>/dev/null)" != "$sid" ]] || rm -f "$CURRENT_FILE"
   echo "terminated $sid"
 }
 

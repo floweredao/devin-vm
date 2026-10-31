@@ -174,6 +174,16 @@ done
 [ "$(cat "$T/state/current" 2>/dev/null)" = "$sid" ]
 check "down without an org id keeps the current session" $?
 
+reset with-session with-org
+out="$(DVM_SESSION=othersession "$ROOT/bin/dvm" down 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && grep -q 'terminated othersession' <<<"$out" && [ "$(cat "$T/state/current" 2>/dev/null)" = "$sid" ]
+check "down of a DVM_SESSION session keeps the unrelated current session" $?
+
+reset with-session with-org
+dvm down
+[ "$rc" -eq 0 ] && [ ! -e "$T/state/current" ]
+check "down of the current session forgets it" $?
+
 # A rejected API call: curl --fail-with-body prints the server's explanation on stdout and exits
 # non-zero. dvm must report that explanation, and must not pass the error body on as session data.
 mkdir -p "$T/failbin"
