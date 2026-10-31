@@ -1,0 +1,32 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  offline-tests:
+    name: offline tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show the tools the tests use
+        run: |
+          sw_vers
+          bash --version | head -1
+          for t in jq rsync perl python3 ssh script; do printf '%-8s %s\n' "$t" "$(command -v "$t" || echo MISSING)"; done
+
+      # Every script here stubs devin, curl, ssh-keyscan and ssh-keygen, so nothing leaves the runner.
+      # tests/reconnect-retry-live.sh needs a real Devin session and is deliberately left out.
+      - name: Run the offline test scripts
+        run: |
+          status=0
+          for t in tests/*-test.sh; do
+            echo "::group::$t"
+            bash "$t" || status=1
+            echo "::endgroup::"
+          done
+          exit $status
