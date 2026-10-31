@@ -133,7 +133,7 @@ Other useful commands:
 `macrun` uploads a cleaned copy, not your folder as-is:
 
 - Only files that git tracks or does not ignore (or every file if the folder is not a git repo).
-- Never: `.git`, `node_modules`, `build`, `.build`, `DerivedData`, `target`, `data`, `.DS_Store`, `.env` and `.env.*` (except `.env.example`, `.env.sample`, `.env.template`), `Local.xcconfig`, `*.p12`, `*.p8`, `*.key`, `*.pem`, `*.mobileprovision`, keychains, files named like `credentials`, and untracked `.omo`/`.senpi` agent folders.
+- Never: `.git`, `node_modules`, `build`, `.build`, `DerivedData`, `target`, `data`, `.DS_Store`, `.env` and `.env.*` (except `.env.example`, `.env.sample`, `.env.template`), `Local.xcconfig`, `*.p12`, `*.p8`, `*.key`, `*.pem`, `*.mobileprovision`, keychains, files named like `credentials`, and untracked files in the agent state folders `.omo` and `.senpi` (OMO and Senpi; set `MACRUN_SKIP_UNTRACKED` to change the list).
 - The upload also leaves out every `.swiftpm` and `.state` folder.
 - When the folder is the top of a git repo, the copy gets a one-commit `.git` at your current `HEAD` so `git rev-parse` and `git status` work in build scripts; a subfolder of a repo gets none. If a tracked or committed file is left out by the list above (a secret, but also, for example, a file under `data` or `build`), no git data is sent at all. Turn this off with `MACRUN_GIT=0`.
 
@@ -211,9 +211,10 @@ Write `export NAME=value` in that file, so the `dvm` that `macrun` starts sees t
 | `MACRUN_WAKE_LOG` | `$MACRUN_LOG_DIR/wake.log` | one line per wake |
 | `MACRUN_STATE_DIR` | `~/.local/state/mac-offload` | locks, wake stamps, and `devin-active-until` |
 | `MACRUN_CACHE_DIR` | `~/.cache/mac-offload/macrun` | staged copies of your projects |
+| `MACRUN_SKIP_UNTRACKED` | `.omo .senpi` | space-separated folder names whose untracked files are not uploaded (tracked files still are); empty uploads them all |
 | `MACRUN_STAGE_ONLY` | `0` | `1` stages the copy, prints where, and stops (to check what would be uploaded) |
 | `DVM_ACTIVE_WINDOW` | `10800` | seconds `macrun` marks the VM as in use after each run (see below) |
-| `MAC_OFFLOAD_LIB` | `<repo>/share/mac-offload/lib` | folder of an optional `dvm-vendor.sh` hook; when it exists, `macrun` sources it and calls `dvm_vendor_sync` before uploading |
+| `MAC_OFFLOAD_LIB` | unset | folder of an optional `dvm-vendor.sh` hook; when set and the file exists, `macrun` sources it and calls `dvm_vendor_sync` before uploading |
 
 `macrun` writes the time until which the VM counts as in use to `$MACRUN_STATE_DIR/devin-active-until` (epoch seconds): now plus `DVM_ACTIVE_WINDOW` after every run. Nothing in this repo reads it; it is for your own keep-alive or sleep job. `macrun --awake 2h` (or `30m`) extends it, `macrun --awake 0` clears it, and `macrun --status` prints it.
 
