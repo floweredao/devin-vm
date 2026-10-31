@@ -5,6 +5,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 HOME_DIR="$HOME"
 CONFIG="${MAC_OFFLOAD_CONFIG:-$HOME_DIR/.config/mac-offload/devin.env}"
+# shellcheck source=/dev/null # the user's own config file
 [ -f "$CONFIG" ] && . "$CONFIG"
 DVM="${DVM:-$SCRIPT_DIR/dvm}"
 DVM_ACTIVE_WINDOW="${DVM_ACTIVE_WINDOW:-10800}"
@@ -238,6 +239,7 @@ if [ "${MACRUN_STAGE_ONLY:-0}" = 1 ]; then echo "staged $count files at $staging
 # Optional hook: a launchd keep-alive job that cannot read ~/Documents can ship a dvm-vendor.sh
 # that copies dvm and its session state elsewhere. Without it, nothing happens here.
 vendor_lib="${MAC_OFFLOAD_LIB:-$SCRIPT_DIR/../share/mac-offload/lib}/dvm-vendor.sh"
+# shellcheck source=/dev/null # optional user hook, not in this repo
 if [ -f "$vendor_lib" ]; then . "$vendor_lib"; dvm_vendor_sync; fi
 if [ "$no_sync" -eq 0 ]; then "$DVM" push "$staging" "work/macrun/$name" --exclude target/ --exclude .swiftpm/ || exit $?; fi
 toolchain_prefix=""
