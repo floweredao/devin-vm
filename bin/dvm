@@ -190,6 +190,7 @@ cmd_wake() {
 
 cmd_wait() {
   local limit="${1:-600}" sid start
+  [[ "$limit" =~ ^[0-9]+$ ]] || die "wait: SECONDS must be a whole number of seconds: $limit"
   sid="$(session)"
   start=$SECONDS
   echo "waiting for SSH on $sid (up to ${limit}s)..."
@@ -390,7 +391,9 @@ cmd_push() {
       *) if [[ -z "$local_dir" ]]; then local_dir="$1"; elif [[ -z "$remote_dir" ]]; then remote_dir="$1"; else die "push: too many arguments"; fi; shift ;;
     esac
   done
-  local_dir="$(cd "${local_dir:-.}" && pwd)"
+  local_dir="${local_dir:-.}"
+  [[ -d "$local_dir" ]] || die "push: not a directory: $local_dir"
+  local_dir="$(cd "$local_dir" && pwd)"
   remote_dir="${remote_dir:-work/$(basename "$local_dir")}"
   local sid pattern
   sid="$(session)"
