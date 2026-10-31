@@ -423,9 +423,13 @@ cmd_doctor() {
 }
 
 main() {
-  need devin; need jq; need curl
   local sub="${1:-help}"
   [[ $# -gt 0 ]] && shift
+  # help, use and current only print or store an id, so they work before the tools are installed.
+  case "$sub" in
+    help|-h|--help|use|current) ;;
+    *) need devin; need jq; need curl ;;
+  esac
   case "$sub" in
     up) cmd_up "$@" ;;
     use) cmd_use "$@" ;;
