@@ -12,8 +12,15 @@ T="$(cd "$T" && pwd -P)"
 mkdir -p "$T/vm" "$T/local" "$T/bin"
 cat > "$T/bin/fakessh" <<'EOF'
 #!/bin/bash
-# ssh [-o opt]... [-T] HOST CMD... -> run CMD in $VM_HOME like a remote login shell
-while [ $# -gt 0 ]; do case "$1" in -o) shift 2 ;; -*) shift ;; *) break ;; esac; done
+# ssh [-o opt]... [-l user] [-T] HOST CMD... -> run CMD in $VM_HOME like the VM's login shell.
+# rsync on Linux passes the remote user as "-l user host"; openrsync passes "user@host".
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o|-l|-p|-i|-F|-E) shift 2 ;;
+    -*) shift ;;
+    *) break ;;
+  esac
+done
 shift
 cd "$VM_HOME" && exec sh -c "$*"
 EOF
@@ -22,7 +29,11 @@ export VM_HOME="$T/vm"
 lib="$T/dvm-lib"
 sed '$d' "$ROOT/bin/dvm" > "$lib"
 pass=0 fail=0
-check() { if [ "$2" -eq 0 ]; then echo "PASS $1"; pass=$((pass + 1)); else echo "FAIL $1"; fail=$((fail + 1)); fi; }
+check() { # NAME RC - a failure prints what rsync said, so CI explains itself
+  if [ "$2" -eq 0 ]; then echo "PASS $1"; pass=$((pass + 1))
+  else echo "FAIL $1"; sed 's/^/     | /' "$T/out" 2>/dev/null; fail=$((fail + 1))
+  fi
+}
 dvmf() { # FUNCTION ARGS... with the transport replaced by fakessh
   bash -c 'source "$1"; shift
     session() { echo stubsession; }
