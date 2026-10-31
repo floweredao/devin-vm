@@ -353,6 +353,11 @@ remote_path() { # PATH -> PATH quoted for the remote shell; a leading ~ or ~/ st
   esac
 }
 
+# shellcheck disable=SC2088 # the ~ is printed, not expanded
+shown_path() { # PATH -> how the VM resolves it, for messages: relative paths are under ~
+  case "$1" in /*|'~'|'~/'*) printf '%s' "$1" ;; *) printf '~/%s' "$1" ;; esac
+}
+
 # rsync hands the remote path to the VM's login shell, which splits it at spaces. RSYNC_OLD_ARGS=1
 # keeps rsync 3.2.4+ from adding its own escaping on top (older rsync and openrsync ignore it).
 remote_glob() { # PATH -> like remote_path, but * ? [ ] still expand on the VM
@@ -409,7 +414,7 @@ cmd_push() {
   local args=(-az --delete -e "$(ssh_base "$sid")")
   for pattern in "${excludes[@]}"; do args+=(--exclude "$pattern"); done
   with_reconnect "$sid" env RSYNC_OLD_ARGS=1 rsync "${args[@]}" "$local_dir/" "$(ssh_host "$sid"):$(remote_path "$remote_dir")/"
-  echo "pushed $local_dir -> ~/$remote_dir"
+  echo "pushed $local_dir -> $(shown_path "$remote_dir")"
 }
 
 cmd_pull() {
@@ -418,7 +423,7 @@ cmd_pull() {
   sid="$(session)"
   mkdir -p "$dest"
   with_reconnect "$sid" env RSYNC_OLD_ARGS=1 rsync -az -e "$(ssh_base "$sid")" "$(ssh_host "$sid"):$(remote_glob "$remote")" "$dest"
-  echo "pulled ~/$remote -> $dest"
+  echo "pulled $(shown_path "$remote") -> $dest"
 }
 
 cmd_forward() {
