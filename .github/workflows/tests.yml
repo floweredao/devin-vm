@@ -30,3 +30,12 @@ jobs:
             echo "::endgroup::"
           done
           exit $status
+
+  # macOS ships openrsync; Linux and WSL have rsync 3.2.4+, which quotes remote paths itself.
+  rsync-linux:
+    name: rsync paths (Linux, rsync 3.x)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests/rsync-path-test.sh
+        run: bash tests/rsync-path-test.sh
