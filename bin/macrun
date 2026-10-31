@@ -119,7 +119,10 @@ case "${1:-}" in
     if [ -f "$STATE_DIR/devin-active-until" ]; then cat "$STATE_DIR/devin-active-until"; else echo 0; fi
     exit "$status_rc" ;;
   --awake)
-    seconds="$(duration_seconds "${2:-}")" || { usage >&2; exit 2; }
+    seconds="$(duration_seconds "${2:-}")" || {
+      echo "macrun: --awake takes 0, <N>m or <N>h, for example '--awake 30m' or '--awake 2h'" >&2
+      usage >&2; exit 2
+    }
     mkdir -p "$STATE_DIR"
     if [ "$seconds" -eq 0 ]; then printf '0\n' > "$STATE_DIR/devin-active-until"
     else DVM_ACTIVE_WINDOW="$seconds"; set_window
