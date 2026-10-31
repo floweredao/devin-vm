@@ -63,6 +63,16 @@ dvm use https://app.devin.ai/sessions/devin-abc123/
 [ "$rc" -eq 0 ] && [ "$(cat "$T/state/current")" = abc123 ]
 check "use takes a session URL and stores the bare id" $?
 
+for url in 'https://app.devin.ai/sessions/abc124?tab=shell' 'https://app.devin.ai/sessions/devin-abc124/#top'; do
+  dvm use "$url"
+  [ "$rc" -eq 0 ] && [ "$(cat "$T/state/current")" = abc124 ]
+  check "use drops the query or fragment of '$url'" $?
+done
+
+dvm use 'abc$(id)'
+[ "$rc" -eq 1 ] && grep -q 'not a session id' <<<"$out"
+check "use still rejects an id with shell characters" $?
+
 dvm use one two
 [ "$rc" -eq 1 ] && grep -q 'use: expected one session id or URL' <<<"$out"
 check "use rejects two arguments" $?
