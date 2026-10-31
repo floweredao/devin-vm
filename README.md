@@ -156,6 +156,7 @@ Your code still leaves your machine for Cognition's cloud. Do not use this for c
 
 | Symptom | Fix |
 | --- | --- |
+| `dvm doctor` shows `tools    MISSING ...` | Install the listed tools with the command in parentheses, or rerun `./install.sh`, which checks the same list. |
 | `dvm doctor` shows `api FAILED` | Run `devin auth login` again, or set `DEVIN_API_KEY` to a `cog_` token. Your plan may not include the API (see Requirements). |
 | `no current session` | `dvm up --mode swe-2-medium`, or `dvm use <session-id-or-url>` for an existing one. |
 | `SSH did not answer` / commands hang at the start | The VM is waking up; `dvm wait` and try again. `dvm status` shows the session state. |
