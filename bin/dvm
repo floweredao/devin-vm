@@ -78,7 +78,12 @@ api() { # METHOD PATH [JSON_BODY]
   # Every local user can read curl's argv (ps), so curl reads the Authorization header from stdin.
   local header
   for header in "${args[@]}"; do [[ "$header" == Authorization:* ]] && break; done
-  printf '%s\n' "$header" | curl "${args[@]/#Authorization:*/@-}" || die "API $method $path failed"
+  local out rc=0
+  out="$(printf '%s\n' "$header" | curl "${args[@]/#Authorization:*/@-}")" || rc=$?
+  # --fail-with-body answers a rejected call with the server's explanation in the body. Report it
+  # instead of returning it to the caller, which would read it as session data.
+  (( rc == 0 )) || die "API $method $path failed (curl exit $rc)${out:+: $(printf '%s' "$out" | tr -d '\r' | tr '\n' ' ' | cut -c1-400)}"
+  printf '%s' "$out"
 }
 
 org_id() {
