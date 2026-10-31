@@ -249,7 +249,10 @@ control_path() { # ssh expands %-tokens in ControlPath, so a literal % is writte
   local path="$STATE_DIR/cm-${1:0:16}"
   printf '%s' "${path//%/%%}"
 }
-ssh_base() { # SID -> ssh command line (without host) that only reuses the master
+ssh_argv() { # SID -> sets SSH_ARGV to the ssh command (without host) that only reuses the master
+  SSH_ARGV=(/usr/bin/ssh -o "ControlPath=$(control_path "$1")" -o ControlMaster=no -o BatchMode=yes -T)
+}
+ssh_base() { # SID -> the same command as one string, for rsync -e (rsync splits it itself)
   printf '/usr/bin/ssh -o ControlPath=%s -o ControlMaster=no -o BatchMode=yes -T' "$(control_path "$1")"
 }
 
@@ -311,8 +314,10 @@ with_reconnect() { # SID CMD...
   [[ -z "$sig" ]] || kill -s INT $$
   # CMD can exit 255 itself (perl's die does). If a new session over the master still opens,
   # the connection is fine and CMD is not run again.
+  local SSH_ARGV
+  ssh_argv "$sid"
   if (( rc == 255 )) && master_alive "$sid" &&
-      $(ssh_base "$sid") "$(ssh_host "$sid")" true </dev/null >/dev/null 2>&1; then
+      "${SSH_ARGV[@]}" "$(ssh_host "$sid")" true </dev/null >/dev/null 2>&1; then
     return "$rc"
   fi
   if (( rc == 255 )) || { (( rc != 0 )) && ! master_alive "$sid"; }; then
@@ -331,9 +336,10 @@ with_reconnect() { # SID CMD...
 }
 
 remote_ssh() { # SID REMOTE_COMMAND...
-  local sid="$1"
+  local sid="$1" SSH_ARGV
   shift
-  with_reconnect "$sid" $(ssh_base "$sid") "$(ssh_host "$sid")" "$@"
+  ssh_argv "$sid"
+  with_reconnect "$sid" "${SSH_ARGV[@]}" "$(ssh_host "$sid")" "$@"
 }
 
 remote_path() { # PATH -> PATH quoted for the remote shell; a leading ~ or ~/ still expands there

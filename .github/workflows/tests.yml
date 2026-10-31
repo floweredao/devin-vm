@@ -39,3 +39,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run tests/rsync-path-test.sh
         run: bash tests/rsync-path-test.sh
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck the scripts
+        run: |
+          shellcheck --version | head -2
+          shellcheck -S warning bin/dvm bin/macrun install.sh libexec/ssh tests/*.sh
