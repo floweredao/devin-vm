@@ -3,7 +3,7 @@
 # one (agent shells, launchd, WSL). devin and curl are stubs; the stub devin records whether it
 # could open /dev/tty, so nothing leaves this machine.
 set -u
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" # physical path: the stub sees /private/var, not /var
 T="$(mktemp -d "${TMPDIR:-/tmp}/dvm-pty.XXXXXX")"
 # ssh binds the master to "<ControlPath>.<16 characters>", which has to fit a Unix socket address
 # (104 bytes on macOS), so the state dir lives under a short root: a macOS TMPDIR is too long.
