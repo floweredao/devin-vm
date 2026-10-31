@@ -4,7 +4,7 @@
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 fail=0
-vars="$(grep -ohE '\$\{(DEVIN|DVM|MACRUN|MAC_OFFLOAD)_?[A-Z_]*:-' "$ROOT/bin/dvm" "$ROOT/bin/macrun" "$ROOT/libexec/ssh" | sed -E 's/^\$\{//; s/:-$//' | sort -u)"
+vars="$(grep -ohE '\$\{(DEVIN|DVM|MACRUN|MAC_OFFLOAD)_?[A-Z_]*:?-' "$ROOT/bin/dvm" "$ROOT/bin/macrun" "$ROOT/libexec/ssh" | sed -E 's/^\$\{//; s/:?-$//' | sort -u)"
 # Set by the tools for their own child processes, not by users.
 vars="$(printf '%s\n' $vars | grep -vxE 'MACRUN_LOCKED|MACRUN_WAKE_FOR|DVM_CONTROL_PATH')"
 [ -n "$vars" ] || { echo "FAIL found no variables in bin/ and libexec/"; exit 1; }
