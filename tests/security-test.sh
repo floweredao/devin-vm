@@ -4,8 +4,11 @@
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 T="$(mktemp -d "${TMPDIR:-/tmp}/dvm-sec.XXXXXX")"
-trap 'rm -rf "$T"' EXIT
-mkdir -p "$T/state" "$T/bin" "$T/home"
+# ssh binds the master to "<ControlPath>.<16 characters>", which has to fit a Unix socket address
+# (104 bytes on macOS), so the state dir lives under a short root: a macOS TMPDIR is too long.
+S="$(mktemp -d /tmp/dvm-sec-state.XXXXXX)"
+trap 'rm -rf "$T" "$S"' EXIT
+mkdir -p "$T/bin" "$T/home"
 sid=stubsession0000000000000000000000
 token=cog_synthetic_token_0000
 # The stub curl writes its argv (what ps shows) to $STUB_LOG and any header it reads from stdin
@@ -37,11 +40,11 @@ case "$1" in
 esac
 EOF
 chmod +x "$T/bin/"*
-export HOME="$T/home" DVM_STATE_DIR="$T/state" PATH="$T/bin:$PATH" STUB_LOG="$T/calls" DEVIN_API_KEY="$token"
+export HOME="$T/home" DVM_STATE_DIR="$S" PATH="$T/bin:$PATH" STUB_LOG="$T/calls" DEVIN_API_KEY="$token"
 unset DVM_SESSION DEVIN_ORG_ID DVM_SSH_GATEWAY
 pass=0 fail=0
 check() { if [ "$2" -eq 0 ]; then echo "PASS $1"; pass=$((pass + 1)); else echo "FAIL $1"; fail=$((fail + 1)); fi; }
-reset() { rm -f "$T/calls"* "$T/home/.ssh/known_hosts"; printf '%s' "$sid" > "$T/state/current"; printf 'org-stub' > "$T/state/org_id"; }
+reset() { rm -f "$T/calls"* "$T/home/.ssh/known_hosts"; printf '%s' "$sid" > "$S/current"; printf 'org-stub' > "$S/org_id"; }
 
 # ---------- the API token stays out of argv ----------
 
@@ -62,7 +65,7 @@ check "the CLI login token is not in curl's argv either" $?
 
 reset
 out="$("$ROOT/bin/dvm" use 'abc -Jevil.example' 2>&1)"; rc=$?
-[ "$rc" -ne 0 ] && grep -q 'not a session id' <<<"$out" && [ "$(cat "$T/state/current")" = "$sid" ]
+[ "$rc" -ne 0 ] && grep -q 'not a session id' <<<"$out" && [ "$(cat "$S/current")" = "$sid" ]
 check "use rejects an id that would split into extra ssh options and keeps the current one" $?
 
 reset
@@ -79,7 +82,7 @@ check "a DVM_SESSION with a space never reaches devin ssh" $?
 
 reset
 "$ROOT/bin/dvm" use https://app.devin.ai/sessions/devin-0123abcdef_x-9/ >/dev/null 2>&1
-[ "$(cat "$T/state/current")" = 0123abcdef_x-9 ]
+[ "$(cat "$S/current")" = 0123abcdef_x-9 ]
 check "use still takes a session URL" $?
 
 # ---------- gateway host key ----------
