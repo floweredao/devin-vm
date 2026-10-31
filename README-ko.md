@@ -173,33 +173,64 @@ macrun --no-sync ~/code/MyApp 'swift test --filter LoginTests'
 
 ## 설정
 
-셸에서 정하거나, `macrun`이 읽는 `~/.config/mac-offload/devin.env`(또는 `$MAC_OFFLOAD_CONFIG`)에 적어요. 이 파일에서 `dvm`이 읽는 값(`DEVIN_*`, `DVM_SESSION`, `DVM_STATE_DIR`, `DVM_RECONNECT_TRIES`)은 `export 이름=값`으로 적어요.
+셸에서 정하거나, `macrun`이 시작할 때 읽는 `~/.config/mac-offload/devin.env`(또는 `$MAC_OFFLOAD_CONFIG`가 가리키는 파일)에 적어요. [`devin.env.example`](devin.env.example)에 기본값과 함께 모두 있어요.
+
+```sh
+mkdir -p ~/.config/mac-offload && cp devin-vm/devin.env.example ~/.config/mac-offload/devin.env
+```
+
+이 파일에는 `export 이름=값`으로 적어요. 그래야 `macrun`이 띄우는 `dvm`도 그 값을 봐요. `dvm`만 따로 쓸 때는 이 파일을 읽지 않으니, 셸 프로필에 적어 두세요.
+
+`dvm`:
 
 | 변수 | 기본값 | 뜻 |
 | --- | --- | --- |
 | `DEVIN_API_KEY` | CLI 로그인 | API 토큰(`cog_...`) |
-| `DEVIN_ORG_ID` | `/v3/self`에서 | Devin 조직 id |
+| `DEVIN_ORG_ID` | `/v3/self`에서 | Devin 조직 id(상태 폴더에 저장해 둬요) |
+| `DEVIN_API_BASE` | `https://api.devin.ai` | Devin API 주소 |
+| `DEVIN_CREDENTIALS_FILE` | `~/.local/share/devin/credentials.toml` | CLI 로그인 토큰을 읽을 파일 |
 | `DVM_SESSION` | `.state/current` | 현재 세션 대신 쓸 세션 |
-| `DVM_STATE_DIR` | `<저장소>/.state` | `dvm`이 현재 세션, 저장해 둔 조직 id, SSH 소켓을 두는 곳 |
+| `DVM_STATE_DIR` | `<저장소>/.state` | `dvm`이 현재 세션, 저장해 둔 조직 id, SSH 소켓을 두는 곳. 짧고 공백 없는 경로로 |
+| `DVM_SSH_GATEWAY` | `ssh.devin.ai` | SSH 게이트웨이 호스트 |
+| `DVM_RECONNECT_TRIES` | `3` | VM이 깨어날 때 로그인을 몇 번 시도할지 |
+| `DVM_RECONNECT_PAUSE` | `15` | 그 로그인 사이의 초 |
+| `DVM_CONTROL_PERSIST` | `1800` | 공유 SSH 로그인을 쓰지 않을 때 열어 두는 초 |
+
+`macrun`:
+
+| 변수 | 기본값 | 뜻 |
+| --- | --- | --- |
+| `MAC_OFFLOAD_CONFIG` | `~/.config/mac-offload/devin.env` | 읽을 설정 파일 |
 | `DVM` | `macrun` 옆의 `bin/dvm` | `macrun`이 쓸 `dvm` |
 | `DVM_WAKE_AFTER` / `DVM_WAKE_EVERY` | `240` / `240` | 첫 깨우기까지, 깨우기 사이의 초. `0`이면 꺼요 |
-| `DVM_RECONNECT_TRIES` | `3` | VM이 깨어날 때 로그인을 몇 번 시도할지 |
+| `DVM_WAKE_TICK` | `5` | 깨우기 타이머가 확인하는 간격(초) |
 | `MACRUN_GIT` | `1` | `0`이면 git 정보를 보내지 않아요 |
 | `MACRUN_DEVELOPER_DIR` | `auto` | VM의 Xcode: `auto`, `none`, 또는 경로 |
 | `MACRUN_LOG_DIR` | `~/Library/Logs/mac-offload/macrun`(리눅스/WSL: `~/.local/state/mac-offload/logs/macrun`) | 실행 로그 |
+| `MACRUN_WAKE_LOG` | `$MACRUN_LOG_DIR/wake.log` | 깨울 때마다 한 줄 |
+| `MACRUN_STATE_DIR` | `~/.local/state/mac-offload` | 잠금 파일, 깨우기 기록, `devin-active-until` |
+| `MACRUN_CACHE_DIR` | `~/.cache/mac-offload/macrun` | 올리기 전에 정리한 프로젝트 사본 |
+| `MACRUN_STAGE_ONLY` | `0` | `1`이면 사본만 만들고 위치를 알려 준 뒤 멈춰요(무엇이 올라갈지 확인용) |
+| `DVM_ACTIVE_WINDOW` | `10800` | 실행마다 VM을 사용 중으로 표시하는 초(아래 참고) |
+| `MAC_OFFLOAD_LIB` | `<저장소>/share/mac-offload/lib` | 선택 훅 `dvm-vendor.sh`가 있는 폴더. 있으면 올리기 전에 읽어서 `dvm_vendor_sync`를 불러요 |
+
+`macrun`은 VM을 언제까지 사용 중으로 볼지를 `$MACRUN_STATE_DIR/devin-active-until`(epoch 초)에 적어요. 실행이 끝날 때마다 지금 + `DVM_ACTIVE_WINDOW`예요. 이 저장소에서는 아무것도 이 값을 읽지 않아요. 직접 만든 깨우기·재우기 작업에서 쓰라고 있어요. `macrun --awake 2h`(또는 `30m`)로 늘리고, `macrun --awake 0`으로 지우고, `macrun --status`로 봐요.
 
 ## 테스트
 
+`tests/*-test.sh`는 모두 오프라인이에요(`devin`, `curl`, `ssh`는 가짜). CI에서도 돌아요.
+
 ```sh
-tests/macrun-test.sh          # 오프라인, dvm은 가짜
-tests/mode-wake-test.sh       # 오프라인, API는 가짜
-tests/login-pty-test.sh       # 오프라인, devin은 가짜
-tests/dvm-args-test.sh        # 오프라인, dvm 인자와 오류 처리; curl과 devin은 가짜
-tests/install-test.sh         # 오프라인, 임시 --prefix에 설치
-tests/ssh-reconnect-test.sh   # 오프라인, ssh와 devin은 가짜
+for t in tests/*-test.sh; do bash "$t" || echo "FAILED $t"; done
 tests/reconnect-retry-live.sh # 실제 세션 필요
 ```
+
+바꾼 것을 보내기 전에 [CONTRIBUTING.md](CONTRIBUTING.md)를 읽어 주세요.
 
 ## AI 에이전트용
 
 [`SKILL.md`](SKILL.md)는 같은 흐름을 적은 에이전트 스킬이에요. 이 폴더를 에이전트의 skills 폴더에 링크해서 쓰면 돼요. 윈도우에서 도는 에이전트라면 대신 [`windows/`](windows/SKILL.md)를 링크하세요. 모든 명령을 WSL을 거쳐 돌려요.
+
+## 라이선스
+
+[MIT](LICENSE)
