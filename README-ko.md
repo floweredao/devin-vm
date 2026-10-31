@@ -156,6 +156,7 @@ macrun --no-sync ~/code/MyApp 'swift test --filter LoginTests'
 
 | 증상 | 해결 |
 | --- | --- |
+| `dvm doctor`에 `tools    MISSING ...` | 괄호 안 명령으로 나열된 도구를 설치하거나, 같은 목록을 확인하는 `./install.sh`를 다시 실행해요. |
 | `dvm doctor`에 `api FAILED` | `devin auth login`을 다시 하거나 `DEVIN_API_KEY`에 `cog_` 토큰을 넣어요. 요금제에 API가 없을 수도 있어요(필요한 것 참고). |
 | `no current session` | `dvm up --mode swe-2-medium`, 이미 있는 세션이면 `dvm use <세션 id 또는 URL>`. |
 | `SSH did not answer` / 시작에서 멈춤 | VM이 깨어나는 중이에요. `dvm wait` 후 다시 해요. 상태는 `dvm status`. |
