@@ -80,6 +80,27 @@ dvm forward
 [ "$rc" -eq 1 ] && grep -q 'forward: missing PORT' <<<"$out" && [ ! -s "$STUB_LOG" ]
 check "forward without a port fails" $?
 
+# Without devin, jq and curl on PATH (a fresh machine), help, use and current still work, and
+# the other subcommands name the missing tool.
+mkdir -p "$T/minbin"
+for c in bash dirname readlink cat sed head mkdir; do ln -sf "$(command -v "$c")" "$T/minbin/$c"; done
+bare() { out="$(PATH="$T/minbin" "$T/minbin/bash" "$ROOT/bin/dvm" "$@" 2>&1)"; rc=$?; }
+reset
+for args in help --help; do
+  bare $args
+  [ "$rc" -eq 0 ] && grep -q '^dvm - drive a Devin Cloud macOS VM' <<<"$out"
+  check "'dvm $args' prints the usage without devin, jq and curl installed" $?
+done
+bare use abc123
+[ "$rc" -eq 0 ] && [ "$(cat "$T/state/current")" = abc123 ]
+check "use works without devin, jq and curl installed" $?
+bare current
+[ "$rc" -eq 0 ] && [ "$out" = abc123 ]
+check "current works without devin, jq and curl installed" $?
+bare status
+[ "$rc" -eq 1 ] && grep -q "'devin' is required but not installed" <<<"$out"
+check "status still names the missing devin CLI" $?
+
 # ---------- failures that must stop dvm before it calls out ----------
 
 for args in "status" "run -- true" "forward 3000" "shell"; do
