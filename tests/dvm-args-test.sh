@@ -51,6 +51,14 @@ dvm up --bogus
 [ "$rc" -eq 1 ] && grep -q "up: unknown argument '--bogus'" <<<"$out" && [ ! -s "$STUB_LOG" ]
 check "up rejects an unknown option before any API call" $?
 
+for args in "up --repo" "up --mode" "up --title" "up --platform" "run --cd" "push --exclude"; do
+  reset with-session with-org
+  # shellcheck disable=SC2086 # word splitting of $args is intended
+  dvm $args
+  [ "$rc" -eq 1 ] && grep -qx "dvm: ${args#* } needs a value" <<<"$out" && [ ! -s "$STUB_LOG" ]
+  check "'$args' without a value says so before any call" $?
+done
+
 dvm use https://app.devin.ai/sessions/devin-abc123/
 [ "$rc" -eq 0 ] && [ "$(cat "$T/state/current")" = abc123 ]
 check "use takes a session URL and stores the bare id" $?

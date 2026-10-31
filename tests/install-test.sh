@@ -20,6 +20,10 @@ install --bogus
 [ "$rc" -eq 2 ] && grep -q "unknown argument '--bogus'" <<<"$out"
 check "an unknown argument exits 2" $?
 
+install --prefix
+[ "$rc" -eq 2 ] && [ "$out" = "install.sh: --prefix needs a value" ]
+check "--prefix without a value exits 2 and says so" $?
+
 install --help
 [ "$rc" -eq 0 ] && grep -q 'Usage: ./install.sh \[--prefix DIR\] \[--force\]$' <<<"$out"
 check "--help prints the usage line" $?
