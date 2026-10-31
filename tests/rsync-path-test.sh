@@ -38,6 +38,7 @@ dvmf() { # FUNCTION ARGS... with the transport replaced by fakessh
   bash -c 'source "$1"; shift
     session() { echo stubsession; }
     ssh_base() { printf "%s" "$FAKESSH"; }
+    ssh_argv() { SSH_ARGV=("$FAKESSH"); }
     with_reconnect() { shift; "$@"; }
     "$@"' _ "$lib" "$@"
 }
