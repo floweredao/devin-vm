@@ -217,10 +217,11 @@ case_result "--awake 0 clears the window" $?
 bad_ok=0
 for bad in '' 5 h m fooh 1xm -5m 1.5h; do
   printf '99\n' > "$UNTIL"
-  "$MACRUN" --awake "$bad" >/dev/null 2>&1; awake_rc=$?
-  { [ "$awake_rc" -eq 2 ] && [ "$(cat "$UNTIL")" = 99 ]; } || { echo "  --awake '$bad' returned $awake_rc, window $(cat "$UNTIL")"; bad_ok=1; }
+  out="$("$MACRUN" --awake "$bad" 2>&1)"; awake_rc=$?
+  { [ "$awake_rc" -eq 2 ] && [ "$(cat "$UNTIL")" = 99 ] && grep -q 'macrun: --awake takes' <<<"$out"; } ||
+    { echo "  --awake '$bad' returned $awake_rc, window $(cat "$UNTIL"): $out"; bad_ok=1; }
 done
-case_result "--awake rejects a malformed duration with exit 2 and keeps the window" "$bad_ok"
+case_result "--awake rejects a malformed duration with exit 2, names the forms it takes, and keeps the window" "$bad_ok"
 
 bash -n "$MACRUN" "$0"
 case_result "bash syntax checks pass" $?
