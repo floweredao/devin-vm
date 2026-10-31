@@ -173,33 +173,64 @@ Your code still leaves your machine for Cognition's cloud. Do not use this for c
 
 ## Configuration
 
-Set these in your shell, or in `~/.config/mac-offload/devin.env` (or `$MAC_OFFLOAD_CONFIG`), which `macrun` sources. In that file, write `export NAME=value` for the variables `dvm` reads (`DEVIN_*`, `DVM_SESSION`, `DVM_STATE_DIR`, `DVM_RECONNECT_TRIES`):
+Set these in your shell, or in `~/.config/mac-offload/devin.env` (or the file `$MAC_OFFLOAD_CONFIG` names), which `macrun` sources before it starts. [`devin.env.example`](devin.env.example) lists them with their defaults:
+
+```sh
+mkdir -p ~/.config/mac-offload && cp devin-vm/devin.env.example ~/.config/mac-offload/devin.env
+```
+
+Write `export NAME=value` in that file, so the `dvm` that `macrun` starts sees the value too. `dvm` on its own does not read the file; set its variables in your shell profile when you run `dvm` directly.
+
+`dvm`:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `DEVIN_API_KEY` | CLI login | API token (`cog_...`) |
-| `DEVIN_ORG_ID` | from `/v3/self` | Devin organization id |
+| `DEVIN_ORG_ID` | from `/v3/self` | Devin organization id (cached in the state dir) |
+| `DEVIN_API_BASE` | `https://api.devin.ai` | Devin API base URL |
+| `DEVIN_CREDENTIALS_FILE` | `~/.local/share/devin/credentials.toml` | where to read the CLI login token |
 | `DVM_SESSION` | `.state/current` | session to use instead of the current one |
-| `DVM_STATE_DIR` | `<repo>/.state` | where `dvm` keeps the current session, the cached org id, and the SSH socket |
+| `DVM_STATE_DIR` | `<repo>/.state` | where `dvm` keeps the current session, the cached org id, and the SSH socket; keep the path short and without spaces |
+| `DVM_SSH_GATEWAY` | `ssh.devin.ai` | SSH gateway host |
+| `DVM_RECONNECT_TRIES` | `3` | logins to try when the VM is waking |
+| `DVM_RECONNECT_PAUSE` | `15` | seconds between those logins |
+| `DVM_CONTROL_PERSIST` | `1800` | seconds the shared SSH login stays open when idle |
+
+`macrun`:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MAC_OFFLOAD_CONFIG` | `~/.config/mac-offload/devin.env` | config file to source |
 | `DVM` | `bin/dvm` next to `macrun` | `dvm` binary for `macrun` |
 | `DVM_WAKE_AFTER` / `DVM_WAKE_EVERY` | `240` / `240` | seconds before the first wake and between wakes; `0` turns it off |
-| `DVM_RECONNECT_TRIES` | `3` | logins to try when the VM is waking |
+| `DVM_WAKE_TICK` | `5` | seconds between the wake timer's checks |
 | `MACRUN_GIT` | `1` | `0` sends no git metadata |
 | `MACRUN_DEVELOPER_DIR` | `auto` | Xcode on the VM: `auto`, `none`, or a path |
 | `MACRUN_LOG_DIR` | `~/Library/Logs/mac-offload/macrun` (Linux/WSL: `~/.local/state/mac-offload/logs/macrun`) | run logs |
+| `MACRUN_WAKE_LOG` | `$MACRUN_LOG_DIR/wake.log` | one line per wake |
+| `MACRUN_STATE_DIR` | `~/.local/state/mac-offload` | locks, wake stamps, and `devin-active-until` |
+| `MACRUN_CACHE_DIR` | `~/.cache/mac-offload/macrun` | staged copies of your projects |
+| `MACRUN_STAGE_ONLY` | `0` | `1` stages the copy, prints where, and stops (to check what would be uploaded) |
+| `DVM_ACTIVE_WINDOW` | `10800` | seconds `macrun` marks the VM as in use after each run (see below) |
+| `MAC_OFFLOAD_LIB` | `<repo>/share/mac-offload/lib` | folder of an optional `dvm-vendor.sh` hook; when it exists, `macrun` sources it and calls `dvm_vendor_sync` before uploading |
+
+`macrun` writes the time until which the VM counts as in use to `$MACRUN_STATE_DIR/devin-active-until` (epoch seconds): now plus `DVM_ACTIVE_WINDOW` after every run. Nothing in this repo reads it; it is for your own keep-alive or sleep job. `macrun --awake 2h` (or `30m`) extends it, `macrun --awake 0` clears it, and `macrun --status` prints it.
 
 ## Tests
 
+Every `tests/*-test.sh` script is offline (`devin`, `curl` and `ssh` are stubs) and runs in CI:
+
 ```sh
-tests/macrun-test.sh          # offline, dvm is stubbed
-tests/mode-wake-test.sh       # offline, the API is stubbed
-tests/login-pty-test.sh       # offline, devin is stubbed
-tests/dvm-args-test.sh        # offline, dvm arguments and errors; curl and devin are stubbed
-tests/install-test.sh         # offline, installs into a scratch --prefix
-tests/ssh-reconnect-test.sh   # offline, ssh and devin are stubbed
+for t in tests/*-test.sh; do bash "$t" || echo "FAILED $t"; done
 tests/reconnect-retry-live.sh # live: needs a current session
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before you send a change.
 
 ## For AI agents
 
 [`SKILL.md`](SKILL.md) is an agent skill describing the same workflow. Link this folder into your agent's skills directory to use it. For an agent running on Windows, link [`windows/`](windows/SKILL.md) instead: it runs every command through WSL.
+
+## License
+
+[MIT](LICENSE)
