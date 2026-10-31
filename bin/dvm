@@ -105,8 +105,9 @@ org_id() {
 
 # ---------- session ----------
 
-normalize_id() { # accepts an id or an app.devin.ai session URL
-  local raw="${1%/}"
+normalize_id() { # accepts an id or an app.devin.ai session URL, with or without ?query or #fragment
+  local raw="${1%%[?#]*}"
+  raw="${raw%/}"
   raw="${raw##*/}"
   raw="${raw#devin-}"
   # The id goes into ssh options and file names unquoted; a space would add ssh arguments.
