@@ -11,6 +11,7 @@ HOLD_PROMPT='This session is a remote macOS build/QA machine that another agent 
 
 die() { echo "dvm: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not installed"; }
+need_value() { [[ $# -ge 2 ]] || die "$1 needs a value"; } # OPTION "$@" of the caller's loop
 
 usage() {
   cat <<'EOF'
@@ -127,10 +128,10 @@ cmd_up() {
   local platform="macos" title="dvm remote mac" mode="" repos=() body org response sid url
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --repo) repos+=("$2"); shift 2 ;;
-      --mode) mode="$2"; shift 2 ;;
-      --title) title="$2"; shift 2 ;;
-      --platform) platform="$2"; shift 2 ;;
+      --repo) need_value "$@"; repos+=("$2"); shift 2 ;;
+      --mode) need_value "$@"; mode="$2"; shift 2 ;;
+      --title) need_value "$@"; title="$2"; shift 2 ;;
+      --platform) need_value "$@"; platform="$2"; shift 2 ;;
       *) die "up: unknown argument '$1'" ;;
     esac
   done
@@ -366,7 +367,7 @@ cmd_run() {
   local dir='~' sid
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --cd) dir="$2"; shift 2 ;;
+      --cd) need_value "$@"; dir="$2"; shift 2 ;;
       --) shift; break ;;
       *) break ;;
     esac
@@ -380,7 +381,7 @@ cmd_push() {
   local local_dir="" remote_dir="" excludes=(node_modules/ .build/ DerivedData/ build/ .DS_Store .state/)
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --exclude) excludes+=("$2"); shift 2 ;;
+      --exclude) need_value "$@"; excludes+=("$2"); shift 2 ;;
       *) if [[ -z "$local_dir" ]]; then local_dir="$1"; elif [[ -z "$remote_dir" ]]; then remote_dir="$1"; else die "push: too many arguments"; fi; shift ;;
     esac
   done
