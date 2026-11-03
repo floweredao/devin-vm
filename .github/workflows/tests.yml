@@ -1,15 +1,20 @@
 name: tests
 
 on:
-  push:
-    branches: [main]
   pull_request:
-  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   offline-tests:
     name: offline tests (macOS)
     runs-on: macos-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +40,7 @@ jobs:
   rsync-linux:
     name: rsync paths (Linux, rsync 3.x)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Run tests/rsync-path-test.sh
@@ -43,6 +49,7 @@ jobs:
   shellcheck:
     name: shellcheck
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck the scripts
